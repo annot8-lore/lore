@@ -39,7 +39,7 @@ export function activate(context: vscode.ExtensionContext) {
       endLine = sel.end.line + 1;
     }
 
-    const panel = vscode.window.createWebviewPanel('loreCreate', 'Lore — Chronicle new lore', vscode.ViewColumn.One, {
+    const panel = vscode.window.createWebviewPanel('loreCreate', 'Lore — Chronicle new lore', vscode.ViewColumn.Beside, {
       enableScripts: true,
       retainContextWhenHidden: false
     });

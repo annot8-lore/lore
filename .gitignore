@@ -1,2 +1,24 @@
 # Ignore internal documentation folder
 docs/internal/
+
+# JS files
+node_modules/
+out/
+
+# macOS
+# General system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Icon files
+Icon?
+._*
+
+# volume and indexing
+.Spotlight-V100
+.Trashes
+__MACOSX/
+.fseventsd/
+.DocumentRevisions-V100
+

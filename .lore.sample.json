@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "fileMetadata": {
+    "workspace": "annot8-lore",
+    "createdAt": "2025-11-28T00:00:00Z",
+    "lastUpdatedAt": "2025-11-28T00:00:00Z",
+    "lastUpdatedBy": "dev@example.com",
+    "repoCommit": "deadbeef"
+  },
+  "indexes": { "tags": {}, "filesWithComments": 1 },
+  "items": [
+    {
+      "id": "lore-1",
+      "state": "active",
+      "file": "src/example.ts",
+      "location": { "startLine": 10, "endLine": 12, "anchorText": "function example()" },
+      "summary": "Why this function uses an explicit state machine",
+      "bodyMarkdown": "Detailed explanation and references. Use #LOC:10 to reference lines.",
+      "tags": ["design"],
+      "links": ["https://example.com/doc/arch"],
+      "author": { "name": "A. Dev", "email": "a.dev@example.com" },
+      "createdAt": "2025-11-28T00:00:00Z",
+      "updatedAt": "2025-11-28T00:00:00Z",
+      "contentType": "markdown",
+      "isTrusted": false
+    }
+  ]
+}

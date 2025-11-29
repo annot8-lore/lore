@@ -29,7 +29,7 @@
         "title": "Edit comment"
       },
       {
-        "command": "lore.openComment",
+        "command": "lore.previewMarkdown",
         "title": "Open comment"
       },
       {

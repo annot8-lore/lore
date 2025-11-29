@@ -1,39 +1,39 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { ensureLoreFile, readJson, safeWriteJson, nowISO } from './fsUtils';
 import { getWebviewContent } from './webview';
 import { upsertLoreItem } from './itemManager';
 import type { LoreSnapshot, WebviewMessage, SavePayload, LoreItem } from './types';
 
 const decorationType = vscode.window.createTextEditorDecorationType({
-  backgroundColor: 'rgba(255, 255, 0, 1.0)',
+  backgroundColor: 'rgba(255, 255, 0, 0.3)',
   isWholeLine: true
 });
 
-const commentRanges = new Map<string, {range: vscode.Range, item: LoreItem}[]>();
+const commentRanges = new Map<string, { range: vscode.Range, item: LoreItem }[]>();
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('Lore extension activating');
 
-  // On startup ensure .lore.json exists for the first workspace folder
-  if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+  if (vscode.workspace.workspaceFolders?.length) {
     const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
     ensureLoreFile(root)
-      .then((fp) => console.log('Ensured lore file:', fp))
-      .catch((err) => console.error('failed to ensure lore file', err));
+      .then(fp => console.log('Ensured lore file:', fp))
+      .catch(err => console.error('Failed to ensure lore file:', err));
   }
 
-  const disposable = vscode.commands.registerCommand('lore.createEnrichedComment', async () => {
+  // Create new Lore entry
+  const createCommand = vscode.commands.registerCommand('lore.createEnrichedComment', async () => {
     const folders = vscode.workspace.workspaceFolders;
-    if (!folders || folders.length === 0) {
+    if (!folders?.length) {
       vscode.window.showErrorMessage('Open a workspace before creating lore entries.');
       return;
     }
 
     const root = folders[0].uri.fsPath;
-    const lorePath = await ensureLoreFile(root);
+    await ensureLoreFile(root);
 
-    // Determine the file & selection
     const editor = vscode.window.activeTextEditor;
     let relFile = '';
     let startLine = 1;
@@ -42,87 +42,65 @@ export function activate(context: vscode.ExtensionContext) {
     if (editor) {
       relFile = path.relative(root, editor.document.uri.fsPath);
       const sel = editor.selection;
-      startLine = sel.start.line + 1; // make 1-based
+      startLine = sel.start.line + 1;
       endLine = sel.end.line + 1;
     }
 
-    const panel = vscode.window.createWebviewPanel('loreCreate', 'Lore — Chronicle new lore', vscode.ViewColumn.Beside, {
-      enableScripts: true,
-      retainContextWhenHidden: false
-    });
+    const panel = vscode.window.createWebviewPanel(
+      'loreCreate',
+      'Lore — Chronicle new lore',
+      vscode.ViewColumn.Beside,
+      { enableScripts: true, retainContextWhenHidden: false }
+    );
 
     panel.webview.html = getWebviewContent(panel.webview, context.extensionUri, relFile, startLine, endLine, 'create');
 
     const disposables: vscode.Disposable[] = [];
 
-    // Handle messages from the webview
     panel.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
       if (msg.command === 'save') {
         try {
+          const lorePath = path.join(root, '.lore.json');
           const json = await readJson<LoreSnapshot>(lorePath);
 
-          // Delegate update/create logic to item manager helper
           upsertLoreItem(json, msg as SavePayload, relFile, startLine, endLine);
-
           json.fileMetadata.lastUpdatedAt = nowISO();
 
-          // Safe write
           await safeWriteJson(lorePath, json);
-
           vscode.window.showInformationMessage('Lore saved to .lore.json');
           panel.dispose();
         } catch (e) {
           console.error(e);
           vscode.window.showErrorMessage('Failed to save Lore: ' + String(e));
         }
-      } else if (msg.command === 'edit') {
-        panel.dispose();
-        vscode.commands.executeCommand('lore.editComment', {id: msg.id});
       } else if (msg.command === 'cancel') {
         panel.dispose();
       }
     }, undefined, disposables);
 
-    panel.onDidDispose(() => {
-      disposables.forEach(d => d.dispose());
-    }, null, context.subscriptions);
+    panel.onDidDispose(() => disposables.forEach(d => d.dispose()), null, context.subscriptions);
   });
 
-  // const hoverProvider = vscode.languages.registerHoverProvider('*', {
-  //   provideHover(document, position, token) {
-  //     const filePath = document.uri.fsPath;
-  //     const ranges = commentRanges.get(filePath) || [];
-  //     for (const {range, item} of ranges) {
-  //       if (range.contains(position)) {
-  //         const markdown = new vscode.MarkdownString(`${item.summary}\n\n${item.bodyMarkdown}`, true);
-  //         markdown.appendMarkdown('\n\n---\n');
-  //         const editCommandUri = vscode.Uri.parse(`command:lore.editComment?${encodeURIComponent(JSON.stringify([item.id]))}`);
-  //         const viewCommandUri = vscode.Uri.parse(`command:lore.openComment?${encodeURIComponent(JSON.stringify([item.id]))}`);
-  //         markdown.appendMarkdown(`[Edit Lore](${editCommandUri}) | [View Lore](${viewCommandUri})`);
-  //         markdown.isTrusted = true;
-  //         return new vscode.Hover(markdown, range);
-  //       }
-  //     }
-  //     return null;
-  //   }
-  // });
-
+  // Hover provider
   const hoverProvider = vscode.languages.registerHoverProvider('*', {
-    provideHover(document, position, token) {
+    provideHover(document, position) {
       const filePath = document.uri.fsPath;
       const ranges = commentRanges.get(filePath) || [];
 
       for (const { range, item } of ranges) {
         if (range.contains(position)) {
+
           const editCommandUri = vscode.Uri.parse(
             `command:lore.editComment?${encodeURIComponent(JSON.stringify([item.id]))}`
           );
-          const viewCommandUri = vscode.Uri.parse(
-            `command:lore.openComment?${encodeURIComponent(JSON.stringify([item.id]))}`
+
+          const previewCommandUri = vscode.Uri.parse(
+            `command:lore.previewMarkdown?${encodeURIComponent(JSON.stringify([item.id]))}`
           );
 
-          const mdContent = `${item.summary}\n\n${item.bodyMarkdown || ''}\n\n---\n[Edit Lore](${editCommandUri}) | [View Lore](${viewCommandUri})`;
-          
+          const truncatedBody = (item.bodyMarkdown || '').substring(0, 100);
+          const mdContent = `# ${item.summary}\n\n${truncatedBody}${(item.bodyMarkdown || '').length > 100 ? '...' : ''}\n\n---\n[Edit Lore](${editCommandUri}) | [View Lore](${previewCommandUri})`;
+
           const markdown = new vscode.MarkdownString(mdContent, true);
           markdown.isTrusted = true;
 
@@ -133,156 +111,164 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-
-
+  // CodeLens provider
   const codeLensProvider = vscode.languages.registerCodeLensProvider('*', {
-    provideCodeLenses(document, token) {
+    provideCodeLenses(document) {
       const filePath = document.uri.fsPath;
       const ranges = commentRanges.get(filePath) || [];
       const lenses: vscode.CodeLens[] = [];
-      for (const {range, item} of ranges) {
-        const editLens = new vscode.CodeLens(range, {
-          title: 'Edit Lore',
-          command: 'lore.editComment',
-          arguments: [item.id]
-        });
-        const openLens = new vscode.CodeLens(range, {
-          title: 'Open Lore',
-          command: 'lore.openComment',
-          arguments: [item.id]
-        });
-        lenses.push(editLens, openLens);
+
+      for (const { range, item } of ranges) {
+        lenses.push(
+          new vscode.CodeLens(range, { title: 'Edit Lore', command: 'lore.editComment', arguments: [item.id] }),
+          new vscode.CodeLens(range, { title: 'View Lore', command: 'lore.previewMarkdown', arguments: [item.id] })
+        );
       }
       return lenses;
     }
   });
 
+  // Show enriched comments
   const showCommand = vscode.commands.registerCommand('lore.showEnrichedComments', async () => {
     const folders = vscode.workspace.workspaceFolders;
-    if (!folders) return;
+    if (!folders?.length) return;
+
     const root = folders[0].uri.fsPath;
     const lorePath = path.join(root, '.lore.json');
+
     try {
       const json = await readJson<LoreSnapshot>(lorePath);
       commentRanges.clear();
+
       let highlighted = 0;
       for (const item of json.items) {
         if (item.location.startLine && item.location.endLine) {
           const filePath = path.join(root, item.file);
           const range = new vscode.Range(item.location.startLine - 1, 0, item.location.endLine - 1, 0);
           if (!commentRanges.has(filePath)) commentRanges.set(filePath, []);
-          commentRanges.get(filePath)!.push({range, item});
+          commentRanges.get(filePath)!.push({ range, item });
           highlighted++;
         }
       }
+
       for (const editor of vscode.window.visibleTextEditors) {
         const filePath = editor.document.uri.fsPath;
         const ranges = commentRanges.get(filePath) || [];
         editor.setDecorations(decorationType, ranges.map(r => r.range));
-        vscode.window.showInformationMessage(`Set ${ranges.length} decorations on ${path.basename(filePath)}`);
       }
+
+      vscode.window.showInformationMessage(`Highlighted ${highlighted} comments`);
     } catch (e) {
       vscode.window.showErrorMessage('Failed to load .lore.json: ' + String(e));
     }
   });
 
-  const openLorePanel = async (item: LoreItem, mode: 'edit' | 'view', root: string, context: vscode.ExtensionContext) => {
-    const panel = vscode.window.createWebviewPanel('lorePanel', `Lore — ${mode === 'edit' ? 'Edit' : 'View'} lore`, vscode.ViewColumn.Beside, {
-      enableScripts: true,
-      retainContextWhenHidden: false
-    });
-    panel.webview.html = getWebviewContent(panel.webview, context.extensionUri, item.file, item.location.startLine, item.location.endLine, mode, item.summary, item.bodyMarkdown, typeof item.author === 'string' ? item.author : item.author?.name || '', item.id);
-    const disposables: vscode.Disposable[] = [];
-    panel.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
-      if (msg.command === 'save') {
-        try {
-          const lorePath = path.join(root, '.lore.json');
-          const json = await readJson<LoreSnapshot>(lorePath);
-          upsertLoreItem(json, msg as SavePayload, item.file, item.location.startLine, item.location.endLine);
-          json.fileMetadata.lastUpdatedAt = nowISO();
-          await safeWriteJson(lorePath, json);
-          vscode.window.showInformationMessage('Lore updated');
-          panel.dispose();
-        } catch (e) {
-          vscode.window.showErrorMessage('Failed to update Lore: ' + String(e));
-        }
-      } else if (msg.command === 'edit') {
-        panel.dispose();
-        vscode.commands.executeCommand('lore.editComment', {id: msg.id});
-      } else if (msg.command === 'cancel') {
-        panel.dispose();
-      }
-    }, undefined, disposables);
-    panel.onDidDispose(() => {
-      disposables.forEach(d => d.dispose());
-    }, null, context.subscriptions);
-  };
+  // Open Markdown preview (with temp file cleanup and image handling)
+  const previewMarkdownCommand = vscode.commands.registerCommand('lore.previewMarkdown', async (...args: string[]) => {
+    const id = args[0];
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders) return;
+    const root = folders[0].uri.fsPath;
 
+    try {
+      const lorePath = path.join(root, '.lore.json');
+      const json = await readJson<LoreSnapshot>(lorePath);
+      const item = json.items.find(i => i.id === id);
+      if (!item) return;
+
+      const tempDir = path.join(root, '.vscode', '.lore_temp');
+      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
+      const safeFileName = `lore_${item.id}.md`;
+      const tempFilePath = path.join(tempDir, safeFileName);
+
+      const author = typeof item.author === 'string' ? item.author : item.author?.name || '';
+      const mdContent = `# ${item.summary}\n\n${author ? `*Author: ${author}*` : ''}\n`;
+
+      fs.writeFileSync(tempFilePath, mdContent, 'utf-8');
+
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(tempFilePath));
+      await vscode.commands.executeCommand('markdown.showPreviewToSide', doc.uri);
+
+      const closeWatcher = vscode.workspace.onDidCloseTextDocument((closedDoc) => {
+        if (closedDoc === doc) {
+          fs.unlink(tempFilePath, err => {
+            if (err) console.error('Failed to delete temp file', err);
+          });
+          closeWatcher.dispose();
+        }
+      });
+
+    } catch (e) {
+      vscode.window.showErrorMessage('Failed to open lore preview: ' + String(e));
+    }
+  });
+
+  // Edit command (webview)
   const editCommand = vscode.commands.registerCommand('lore.editComment', async (...args: string[]) => {
     const id = args[0];
     const folders = vscode.workspace.workspaceFolders;
-    if (!folders) return;
+    if (!folders?.length) return;
     const root = folders[0].uri.fsPath;
+    const lorePath = path.join(root, '.lore.json');
+
     try {
-      const lorePath = path.join(root, '.lore.json');
       const json = await readJson<LoreSnapshot>(lorePath);
       const item = json.items.find(i => i.id === id);
-      if (item) {
-        await openLorePanel(item, 'edit', root, context);
-      }
+      if (!item) return;
+
+      const panel = vscode.window.createWebviewPanel(
+        'loreEdit',
+        `Lore — Edit`,
+        vscode.ViewColumn.Beside,
+        { enableScripts: true, retainContextWhenHidden: false }
+      );
+
+      panel.webview.html = getWebviewContent(
+        panel.webview,
+        context.extensionUri,
+        item.file,
+        item.location.startLine,
+        item.location.endLine,
+        'edit',
+        item.summary,
+        item.bodyMarkdown,
+        typeof item.author === 'string' ? item.author : item.author?.name || '',
+        item.id
+      );
+
+      const disposables: vscode.Disposable[] = [];
+
+      panel.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
+        if (msg.command === 'save') {
+          try {
+            upsertLoreItem(json, msg as SavePayload, item.file, item.location.startLine, item.location.endLine);
+            json.fileMetadata.lastUpdatedAt = nowISO();
+            await safeWriteJson(lorePath, json);
+            vscode.window.showInformationMessage('Lore updated');
+            panel.dispose();
+          } catch (e) {
+            vscode.window.showErrorMessage('Failed to update Lore: ' + String(e));
+          }
+        } else if (msg.command === 'cancel') {
+          panel.dispose();
+        }
+      }, undefined, disposables);
+
+      panel.onDidDispose(() => disposables.forEach(d => d.dispose()), null, context.subscriptions);
     } catch (e) {
-      // 
+      vscode.window.showErrorMessage('Failed to load Lore for editing');
     }
   });
 
-  const openCommand = vscode.commands.registerCommand('lore.openComment', async (...args: string[]) => {
-    const id = args[0];
-    const folders = vscode.workspace.workspaceFolders;
-    if (!folders) return;
-    const root = folders[0].uri.fsPath;
-    try {
-      const lorePath = path.join(root, '.lore.json');
-      const json = await readJson<LoreSnapshot>(lorePath);
-      const item = json.items.find(i => i.id === id);
-      if (item) {
-        await openLorePanel(item, 'view', root, context);
-      }
-    } catch (e) {
-      // 
-    }
-  });
-
-  const testWebview = vscode.commands.registerCommand("lore.testWebview", () => {
-    const panel = vscode.window.createWebviewPanel(
-      "testWebview",
-      "Webview Test",
-      vscode.ViewColumn.One,
-      { enableScripts: true }
-    );
-
-    panel.webview.html = getWebviewContent(panel.webview, context.extensionUri, '', 1, 1, 'create', 'Test Summary', 'Test body content', 'Test Author');
-
-    const disposables: vscode.Disposable[] = [];
-
-    // Handle messages from the webview
-    panel.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
-      if (msg.command === 'save') {
-        vscode.window.showInformationMessage('Test webview save received: ' + JSON.stringify(msg));
-        panel.dispose();
-      } else if (msg.command === 'cancel') {
-        vscode.window.showInformationMessage('Test webview cancelled');
-        panel.dispose();
-      }
-    }, undefined, disposables);
-
-    panel.onDidDispose(() => {
-      disposables.forEach(d => d.dispose());
-    }, null, context.subscriptions);
-  });
-
-  context.subscriptions.push(disposable, hoverProvider, codeLensProvider, showCommand, editCommand, openCommand, testWebview);
+  context.subscriptions.push(
+    createCommand,
+    hoverProvider,
+    codeLensProvider,
+    showCommand,
+    editCommand,
+    previewMarkdownCommand
+  );
 }
 
-export function deactivate() {
-  // nothing special
-}
+export function deactivate() { }

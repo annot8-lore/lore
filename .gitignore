@@ -4,6 +4,7 @@ docs/internal/
 # JS files
 node_modules/
 out/
+.vscode/
 
 # macOS
 # General system files

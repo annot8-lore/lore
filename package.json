@@ -19,6 +19,22 @@
       {
         "command": "lore.createEnrichedComment",
         "title": "Lore: Chronicle new lore"
+      },
+      {
+        "command": "lore.showEnrichedComments",
+        "title": "Lore: Show enriched comments"
+      },
+      {
+        "command": "lore.editComment",
+        "title": "Edit comment"
+      },
+      {
+        "command": "lore.openComment",
+        "title": "Open comment"
+      },
+      {
+        "command": "lore.testWebview",
+        "title": "Test Webview"
       }
     ]
   },

@@ -54,4 +54,4 @@ export type SavePayload = {
   links?: string[];
 };
 
-export type WebviewMessage = SavePayload | { command: 'cancel' };
+export type WebviewMessage = SavePayload | { command: 'cancel' } | { command: 'edit', id: string };

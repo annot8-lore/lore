@@ -183,7 +183,7 @@ export function activate(context: vscode.ExtensionContext) {
       const tempFilePath = path.join(tempDir, safeFileName);
 
       const author = typeof item.author === 'string' ? item.author : item.author?.name || '';
-      const mdContent = `# ${item.summary}\n\n${author ? `*Author: ${author}*` : ''}\n`;
+      const mdContent = `# ${item.summary}\n\n${item.bodyMarkdown}\n\n${author ? `*Author: ${author}*` : ''}\n`;
 
       fs.writeFileSync(tempFilePath, mdContent, 'utf-8');
 

@@ -12,6 +12,7 @@ const decorationType = vscode.window.createTextEditorDecorationType({
 });
 
 const commentRanges = new Map<string, { range: vscode.Range, item: LoreItem }[]>();
+let loreSnapshot: LoreSnapshot | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('Lore extension activating');
@@ -57,26 +58,49 @@ export function activate(context: vscode.ExtensionContext) {
 
     const disposables: vscode.Disposable[] = [];
 
-    panel.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
-      if (msg.command === 'save') {
-        try {
-          const lorePath = path.join(root, '.lore.json');
-          const json = await readJson<LoreSnapshot>(lorePath);
+      panel.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
+        if (msg.command === 'save') {
+          try {
+            const lorePath = path.join(root, '.lore.json');
+            console.log('Reading lore file from:', lorePath);
+            const json = await readJson<LoreSnapshot>(lorePath);
+            console.log('Read json with', json.items.length, 'items');
 
-          upsertLoreItem(json, msg as SavePayload, relFile, startLine, endLine);
-          json.fileMetadata.lastUpdatedAt = nowISO();
+            upsertLoreItem(json, msg as SavePayload, relFile, startLine, endLine);
+            json.fileMetadata.lastUpdatedAt = nowISO();
+            console.log('Updated json, now has', json.items.length, 'items');
 
-          await safeWriteJson(lorePath, json);
-          vscode.window.showInformationMessage('Lore saved to .lore.json');
+            await safeWriteJson(lorePath, json);
+            console.log('Wrote to file');
+            loreSnapshot = json; // Update in-memory snapshot
+
+            // Add new item to commentRanges for immediate highlighting
+            const newItem = json.items[json.items.length - 1]; // Assuming upsertLoreItem adds to end
+            if (newItem.location.startLine && newItem.location.endLine) {
+              const filePath = path.join(root, newItem.file);
+              const range = new vscode.Range(newItem.location.startLine - 1, 0, newItem.location.endLine - 1, 0);
+              if (!commentRanges.has(filePath)) commentRanges.set(filePath, []);
+              commentRanges.get(filePath)!.push({ range, item: newItem });
+
+              // Update decorations in visible editors
+              const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === filePath);
+              if (editor) {
+                const ranges = commentRanges.get(filePath) || [];
+                editor.setDecorations(decorationType, ranges.map(r => r.range));
+                vscode.commands.executeCommand('editor.action.codeLensRefresh');
+              }
+            }
+
+            vscode.window.showInformationMessage('Lore saved to .lore.json');
+            panel.dispose();
+          } catch (e) {
+            console.error('Error saving lore:', e);
+            vscode.window.showErrorMessage('Failed to save Lore: ' + String(e));
+          }
+        } else if (msg.command === 'cancel') {
           panel.dispose();
-        } catch (e) {
-          console.error(e);
-          vscode.window.showErrorMessage('Failed to save Lore: ' + String(e));
         }
-      } else if (msg.command === 'cancel') {
-        panel.dispose();
-      }
-    }, undefined, disposables);
+      }, undefined, disposables);
 
     panel.onDidDispose(() => disposables.forEach(d => d.dispose()), null, context.subscriptions);
   });
@@ -138,6 +162,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     try {
       const json = await readJson<LoreSnapshot>(lorePath);
+      loreSnapshot = json;
       commentRanges.clear();
 
       let highlighted = 0;
@@ -163,42 +188,42 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  // Open Markdown preview (with temp file cleanup and image handling)
+  // Open Markdown preview
   const previewMarkdownCommand = vscode.commands.registerCommand('lore.previewMarkdown', async (...args: string[]) => {
     const id = args[0];
     const folders = vscode.workspace.workspaceFolders;
-    if (!folders) return;
+    if (!folders?.length || !loreSnapshot) return;
     const root = folders[0].uri.fsPath;
+    const item = loreSnapshot.items.find(i => i.id === id);
+    if (!item) return;
 
     try {
-      const lorePath = path.join(root, '.lore.json');
-      const json = await readJson<LoreSnapshot>(lorePath);
-      const item = json.items.find(i => i.id === id);
-      if (!item) return;
-
-      const tempDir = path.join(root, '.vscode', '.lore_temp');
-      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
-      const safeFileName = `lore_${item.id}.md`;
-      const tempFilePath = path.join(tempDir, safeFileName);
-
       const author = typeof item.author === 'string' ? item.author : item.author?.name || '';
       const mdContent = `# ${item.summary}\n\n${item.bodyMarkdown}\n\n${author ? `*Author: ${author}*` : ''}\n`;
 
-      fs.writeFileSync(tempFilePath, mdContent, 'utf-8');
+      const panel = vscode.window.createWebviewPanel(
+        'lorePreview',
+        `Lore — ${item.summary}`,
+        vscode.ViewColumn.Beside,
+        { enableScripts: false, retainContextWhenHidden: false }
+      );
 
-      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(tempFilePath));
-      await vscode.commands.executeCommand('markdown.showPreviewToSide', doc.uri);
-
-      const closeWatcher = vscode.workspace.onDidCloseTextDocument((closedDoc) => {
-        if (closedDoc === doc) {
-          fs.unlink(tempFilePath, err => {
-            if (err) console.error('Failed to delete temp file', err);
-          });
-          closeWatcher.dispose();
-        }
-      });
-
+      const html = await vscode.commands.executeCommand('markdown.api.render', mdContent) as string;
+      panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <style>
+            body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); padding: 20px; }
+            .markdown-body { max-width: none; }
+          </style>
+        </head>
+        <body class="markdown-body">
+          ${html}
+        </body>
+        </html>
+      `;
     } catch (e) {
       vscode.window.showErrorMessage('Failed to open lore preview: ' + String(e));
     }
@@ -242,12 +267,26 @@ export function activate(context: vscode.ExtensionContext) {
       panel.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
         if (msg.command === 'save') {
           try {
+            console.log('Editing item:', item.id);
             upsertLoreItem(json, msg as SavePayload, item.file, item.location.startLine, item.location.endLine);
             json.fileMetadata.lastUpdatedAt = nowISO();
+            console.log('Updated json for edit, writing to file');
             await safeWriteJson(lorePath, json);
+            console.log('Wrote edit to file');
+            loreSnapshot = json; // Update in-memory snapshot
+
+            // Refresh live decorations and CodeLens
+            const editor = vscode.window.visibleTextEditors.find(e => path.relative(root, e.document.uri.fsPath) === item.file);
+            if (editor) {
+              const tracked = commentRanges.get(editor.document.uri.fsPath) || [];
+              editor.setDecorations(decorationType, tracked.map(t => t.range));
+              vscode.commands.executeCommand('editor.action.codeLensRefresh');
+            }
+
             vscode.window.showInformationMessage('Lore updated');
             panel.dispose();
           } catch (e) {
+            console.error('Error updating lore:', e);
             vscode.window.showErrorMessage('Failed to update Lore: ' + String(e));
           }
         } else if (msg.command === 'cancel') {
@@ -258,6 +297,101 @@ export function activate(context: vscode.ExtensionContext) {
       panel.onDidDispose(() => disposables.forEach(d => d.dispose()), null, context.subscriptions);
     } catch (e) {
       vscode.window.showErrorMessage('Failed to load Lore for editing');
+    }
+  });
+
+  // Live tracking of decorations for active editor
+  vscode.window.onDidChangeTextEditorVisibleRanges(event => {
+    const editor = event.textEditor;
+    const filePath = editor.document.uri.fsPath;
+    const ranges = commentRanges.get(filePath) || [];
+    editor.setDecorations(decorationType, ranges.map(r => r.range));
+  });
+
+  vscode.workspace.onDidChangeTextDocument(async event => {
+    if (!loreSnapshot || !vscode.workspace.workspaceFolders?.length) return;
+
+    const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const filePath = event.document.uri.fsPath;
+    const relFile = path.relative(root, filePath).replace(/\\/g, '/');
+
+    // Get all items for this file
+    const items = loreSnapshot.items.filter(i => i.file === relFile && i.state === 'active');
+    if (items.length === 0) return;
+
+    let hasChanges = false;
+
+    // Process each content change
+    for (const change of event.contentChanges) {
+      // Calculate line delta
+      const newLines = (change.text.match(/\n/g) || []).length;
+      const oldLines = change.range.end.line - change.range.start.line;
+      const delta = newLines - oldLines;
+
+      if (delta === 0) continue;
+
+      hasChanges = true;
+      const changeStartLine = change.range.start.line;
+
+      // Adjust each lore item's location
+      for (const item of items) {
+        let start = item.location.startLine - 1; // Convert to 0-based
+        let end = item.location.endLine - 1;
+
+        // Single-line comment
+        if (start === end) {
+          if (changeStartLine <= start) {
+            start += delta;
+            end += delta;
+          }
+        }
+        // Multi-line comment
+        else {
+          if (changeStartLine < start) {
+            // Change is before the comment - shift both
+            start += delta;
+            end += delta;
+          } else if (changeStartLine <= end) {
+            // Change is within or at the comment - adjust end only
+            end += delta;
+            // Ensure end doesn't go below start
+            if (end < start) end = start;
+          }
+          // If change is after the comment, no adjustment needed
+        }
+
+        // Update with 1-based line numbers, ensure minimum of 1
+        item.location.startLine = Math.max(1, start + 1);
+        item.location.endLine = Math.max(1, end + 1);
+      }
+    }
+
+    if (hasChanges) {
+      // Update commentRanges map with new ranges
+      const tracked = items.map(item => ({
+        range: new vscode.Range(
+          item.location.startLine - 1, 0,
+          item.location.endLine - 1, 0
+        ),
+        item
+      }));
+      commentRanges.set(filePath, tracked);
+
+      // Update decorations in visible editors
+      const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === filePath);
+      if (editor) {
+        editor.setDecorations(decorationType, tracked.map(t => t.range));
+        vscode.commands.executeCommand('editor.action.codeLensRefresh');
+      }
+
+      // Save updated locations to file
+      const lorePath = path.join(root, '.lore.json');
+      loreSnapshot.fileMetadata.lastUpdatedAt = nowISO();
+      try {
+        await safeWriteJson(lorePath, loreSnapshot);
+      } catch (e) {
+        console.error('Failed to save adjusted lore locations:', e);
+      }
     }
   });
 

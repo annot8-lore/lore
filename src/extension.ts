@@ -111,6 +111,9 @@ export function activate(context: vscode.ExtensionContext) {
   // CodeLens provider
   const codeLensProvider = vscode.languages.registerCodeLensProvider('*', {
     provideCodeLenses(document) {
+      if (!loreManager.getIsHighlightingEnabled()) {
+        return [];
+      }
       const filePath = document.uri.fsPath;
       const ranges = loreManager.getLoreItemsForFile(filePath) || [];
       const lenses: vscode.CodeLens[] = [];
@@ -128,6 +131,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Show enriched comments
   const showCommand = vscode.commands.registerCommand('lore.showEnrichedComments', async () => {
     if (!loreManager) return; // Should not happen if activated correctly
+    loreManager.enableHighlights();
     await loreManager.reloadLore(); // Reloads from disk and updates internal state
     loreManager.refreshDecorations();
     vscode.window.showInformationMessage(`Highlighted ${loreManager.getAllLoreItems().length} comments`);
@@ -238,6 +242,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.executeCommand('editor.action.codeLensRefresh');
   });
 
+  const disableHighlightsCommand = vscode.commands.registerCommand('lore.disableHighlights', async () => {
+    if (loreManager) {
+      loreManager.clearDecorations();
+      vscode.window.showInformationMessage('Lore highlights disabled.');
+    }
+  });
+
   context.subscriptions.push(
     createCommand,
     hoverProvider,
@@ -245,6 +256,7 @@ export function activate(context: vscode.ExtensionContext) {
     showCommand,
     editCommand,
     previewMarkdownCommand,
+    disableHighlightsCommand, // Add the new command
     loreManager // Ensure loreManager's dispose is called
   );
 }

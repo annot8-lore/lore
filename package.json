@@ -35,6 +35,10 @@
       {
         "command": "lore.testWebview",
         "title": "Test Webview"
+      },
+      {
+        "command": "lore.disableHighlights",
+        "title": "Lore: Disable Highlights"
       }
     ]
   },

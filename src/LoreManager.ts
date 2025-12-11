@@ -26,6 +26,8 @@ export class LoreManager implements vscode.Disposable {
     private readonly onDidChangeLoreEmitter = new vscode.EventEmitter<void>();
     public readonly onDidChangeLore = this.onDidChangeLoreEmitter.event;
 
+    private isHighlightingEnabled = false;
+
     constructor(private context: vscode.ExtensionContext, workspaceRoot: string) {
         this.workspaceRoot = workspaceRoot;
         this.loreFilePath = path.join(this.workspaceRoot, '.lore.json');
@@ -198,27 +200,29 @@ export class LoreManager implements vscode.Disposable {
             if (delta === 0) continue;
 
             hasChanges = true;
-            const changeStartLine = change.range.start.line;
-
+            // Adjust each lore item's location
             for (const item of items) {
                 let start = item.location.startLine - 1; // Convert to 0-based
                 let end = item.location.endLine - 1;
 
-                if (start === end) { // Single-line comment
-                    if (changeStartLine <= start) {
-                        start += delta;
-                        end += delta;
-                    }
-                } else { // Multi-line comment
-                    if (changeStartLine < start) {
-                        start += delta;
-                        end += delta;
-                    } else if (changeStartLine <= end) {
-                        end += delta;
-                        if (end < start) end = start;
-                    }
+                const changeStartLine = change.range.start.line;
+
+                // If the change starts before the lore item, shift the whole item
+                if (changeStartLine < start) {
+                    start += delta;
+                    end += delta;
+                }
+                // If the change is within the lore item (but not at the start)
+                else if (changeStartLine >= start && changeStartLine <= end) {
+                    end += delta;
                 }
 
+                // Ensure end doesn't go below start
+                if (end < start) {
+                    end = start;
+                }
+
+                // Update with 1-based line numbers, ensure minimum of 1
                 item.location.startLine = Math.max(1, start + 1);
                 item.location.endLine = Math.max(1, end + 1);
             }
@@ -235,10 +239,26 @@ export class LoreManager implements vscode.Disposable {
 
     public refreshDecorations() {
         for (const editor of vscode.window.visibleTextEditors) {
-            const filePath = editor.document.uri.fsPath;
-            const ranges = this.commentRanges.get(filePath) || [];
+            const ranges = this.isHighlightingEnabled ? (this.commentRanges.get(editor.document.uri.fsPath) || []) : [];
             editor.setDecorations(this.decorationType, ranges.map(r => r.range));
         }
+    }
+
+    public getIsHighlightingEnabled(): boolean {
+        return this.isHighlightingEnabled;
+    }
+
+    public enableHighlights() {
+        this.isHighlightingEnabled = true;
+    }
+
+    public clearDecorations() {
+        this.isHighlightingEnabled = false;
+        this.commentRanges.clear();
+        for (const editor of vscode.window.visibleTextEditors) {
+            editor.setDecorations(this.decorationType, []);
+        }
+        this.onDidChangeLoreEmitter.fire(); // Notify to refresh codelens
     }
 
     public dispose() {

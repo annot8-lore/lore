@@ -47,7 +47,11 @@
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
+    "@types/uuid": "^11.0.0",
     "@types/vscode": "^1.79.0",
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "uuid": "^13.0.0"
   }
 }

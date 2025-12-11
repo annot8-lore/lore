@@ -21,7 +21,7 @@ function getNonce(): string {
  * Generates the HTML content for the create/edit webview.
  */
 export function getWebviewContent(
-    webview: vscode.Webview,
+    cspSource: string,
     extensionUri: vscode.Uri,
     filePath: string,
     startLine: number,
@@ -33,7 +33,7 @@ export function getWebviewContent(
     itemId?: string
 ): string {
     const nonce = getNonce();
-    const cspSource = webview.cspSource;
+
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -42,10 +42,10 @@ export function getWebviewContent(
         <meta http-equiv="Content-Security-Policy"
             content="
                 default-src 'none';
-                img-src ${cspSource} https:;
+                img-src ${cspSource} https: data: vscode-resource:;
                 script-src 'nonce-${nonce}';
                 style-src ${cspSource} 'unsafe-inline';
-                font-src ${cspSource};
+                font-src ${cspSource} vscode-resource:;
             " />
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>${mode === 'edit' ? 'Edit' : 'Create'} Lore</title>

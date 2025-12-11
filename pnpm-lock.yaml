@@ -8,10 +8,16 @@ importers:
 
   .:
     dependencies:
+      marked:
+        specifier: ^17.0.1
+        version: 17.0.1
       uuid:
         specifier: ^13.0.0
         version: 13.0.0
     devDependencies:
+      '@types/marked':
+        specifier: ^6.0.0
+        version: 6.0.0
       '@types/node':
         specifier: ^18.0.0
         version: 18.19.130
@@ -27,6 +33,10 @@ importers:
 
 packages:
 
+  '@types/marked@6.0.0':
+    resolution: {integrity: sha512-jmjpa4BwUsmhxcfsgUit/7A9KbrC48Q0q8KvnY107ogcjGgTFDlIL3RpihNpx2Mu1hM4mdFQjoVc4O6JoGKHsA==}
+    deprecated: This is a stub types definition. marked provides its own type definitions, so you do not need this installed.
+
   '@types/node@18.19.130':
     resolution: {integrity: sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg==}
 
@@ -36,6 +46,11 @@ packages:
 
   '@types/vscode@1.106.1':
     resolution: {integrity: sha512-R/HV8u2h8CAddSbX8cjpdd7B8/GnE4UjgjpuGuHcbp1xV6yh4OeqU4L1pKjlwujCrSFS0MOpwJAIs/NexMB1fQ==}
+
+  marked@17.0.1:
+    resolution: {integrity: sha512-boeBdiS0ghpWcSwoNm/jJBwdpFaMnZWRzjA6SkUMYb40SVaN1x7mmfGKp0jvexGcx+7y2La5zRZsYFZI6Qpypg==}
+    engines: {node: '>= 20'}
+    hasBin: true
 
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
@@ -51,6 +66,10 @@ packages:
 
 snapshots:
 
+  '@types/marked@6.0.0':
+    dependencies:
+      marked: 17.0.1
+
   '@types/node@18.19.130':
     dependencies:
       undici-types: 5.26.5
@@ -60,6 +79,8 @@ snapshots:
       uuid: 13.0.0
 
   '@types/vscode@1.106.1': {}
+
+  marked@17.0.1: {}
 
   typescript@5.9.3: {}
 

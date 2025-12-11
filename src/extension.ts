@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { marked, Token } from 'marked';
 import { ensureLoreFile } from './fsUtils';
 import { getWebviewContent } from './webview';
 import { LoreManager } from './LoreManager';
@@ -140,8 +141,9 @@ export function activate(context: vscode.ExtensionContext) {
   // Open Markdown preview
   const previewMarkdownCommand = vscode.commands.registerCommand('lore.previewMarkdown', async (...args: string[]) => {
     const id = args[0];
-    if (!loreManager) return;
+    if (!loreManager || !vscode.workspace.workspaceFolders?.length) return;
 
+    const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const item = loreManager.getLoreItemById(id);
     if (!item) return;
 
@@ -153,10 +155,25 @@ export function activate(context: vscode.ExtensionContext) {
         'lorePreview',
         `Lore — ${item.summary}`,
         vscode.ViewColumn.Beside,
-        { enableScripts: false, retainContextWhenHidden: false }
+        {
+          enableScripts: false,
+          retainContextWhenHidden: false,
+          localResourceRoots: [vscode.Uri.file(root)]
+        }
       );
 
-      const html = await vscode.commands.executeCommand('markdown.api.render', mdContent) as string;
+      const walkTokens = (token: Token) => {
+        if (token.type === 'image') {
+          if (!token.href.startsWith('http://') && !token.href.startsWith('https://')) {
+            const onDiskPath = vscode.Uri.file(path.join(root, token.href));
+            token.href = panel.webview.asWebviewUri(onDiskPath).toString();
+          }
+        }
+      };
+      
+      marked.use({ walkTokens });
+      
+      const html = marked(mdContent);
       panel.webview.html = `
         <!DOCTYPE html>
         <html>

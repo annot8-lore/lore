@@ -1,3 +1,13 @@
+export const LORE_CATEGORIES = [
+  'Architectural Decision',
+  'Design Requirement',
+  'Future Improvement',
+  'Tech Debt',
+  'Bug Fix',
+  'Onboarding/Explanation',
+  'Open Question',
+];
+
 export interface LoreLocation {
   startLine: number;
   endLine: number;
@@ -26,19 +36,7 @@ export interface LoreItem {
   updatedAt: string;
   contentType?: string;
   isTrusted?: boolean;
-}
-
-export interface LoreSnapshot {
-  schemaVersion: number;
-  fileMetadata: Record<string, unknown> & {
-    workspace?: string;
-    createdAt: string;
-    lastUpdatedAt: string;
-    lastUpdatedBy?: string;
-    repoCommit?: string;
-  };
-  indexes: { tags: Record<string, number>; filesWithComments: number };
-  items: LoreItem[];
+  categories?: string[]; // New field
 }
 
 export type SavePayload = {
@@ -52,6 +50,20 @@ export type SavePayload = {
   author?: string;
   tags?: string[];
   links?: string[];
+  categories?: string[]; // New field
 };
 
 export type WebviewMessage = SavePayload | { command: 'cancel' } | { command: 'edit', id: string };
+
+export interface LoreSnapshot {
+  schemaVersion: number;
+  fileMetadata: Record<string, unknown> & {
+    workspace?: string;
+    createdAt: string;
+    lastUpdatedAt: string;
+    lastUpdatedBy?: string;
+    repoCommit?: string;
+  };
+  indexes: { tags: Record<string, number>; filesWithComments: number };
+  items: LoreItem[];
+}

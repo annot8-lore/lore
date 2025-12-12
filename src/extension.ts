@@ -149,7 +149,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     try {
       const author = typeof item.author === 'string' ? item.author : item.author?.name || '';
-      const mdContent = `# ${item.summary}\n\n${item.bodyMarkdown}\n\n${author ? `*Author: ${author}*` : ''}\n`;
+      const categoriesString = item.categories && item.categories.length > 0 ? `*Categories: ${item.categories.join(', ')}*` : '';
+      const mdContent = `# ${item.summary}\n\n${categoriesString}\n\n${author ? `*Author: ${author}*` : ''}\n${item.bodyMarkdown}\n`;
 
       const panel = vscode.window.createWebviewPanel(
         'lorePreview',
@@ -219,7 +220,8 @@ export function activate(context: vscode.ExtensionContext) {
         item.summary,
         item.bodyMarkdown,
         typeof item.author === 'string' ? item.author : item.author?.name || '',
-        item.id
+        item.id,
+        item.categories
       );
 
     const disposables: vscode.Disposable[] = [];

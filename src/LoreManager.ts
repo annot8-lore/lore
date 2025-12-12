@@ -88,7 +88,7 @@ export class LoreManager implements vscode.Disposable {
     }
 
     public getLoreItemById(id: string): LoreItem | undefined {
-        return this.loreSnapshot?.items.find(item => item.id === id);
+        return this.loreSnapshot?.items.find((item: LoreItem) => item.id === id);
     }
 
     public getAllLoreItems(): LoreItem[] {
@@ -120,13 +120,14 @@ export class LoreManager implements vscode.Disposable {
             createdAt: nowISO(),
             updatedAt: nowISO(),
             contentType: 'markdown',
-            isTrusted: false
+            isTrusted: false,
+            categories: payload.categories || [], // New field
         });
 
         let itemId: string;
 
         if (payload.id) {
-            const idx = this.loreSnapshot.items.findIndex(i => i.id === payload.id);
+            const idx = this.loreSnapshot.items.findIndex((i: LoreItem) => i.id === payload.id);
             if (idx >= 0) {
                 const existing = this.loreSnapshot.items[idx];
                 const updated: LoreItem = {
@@ -145,6 +146,7 @@ export class LoreManager implements vscode.Disposable {
                     links: payload.links ?? existing.links ?? [],
                     author: payload.author ?? existing.author ?? '',
                     updatedAt: nowISO(),
+                    categories: payload.categories ?? existing.categories ?? [], // New field
                 };
                 this.loreSnapshot.items[idx] = updated;
                 itemId = updated.id;
@@ -187,7 +189,7 @@ export class LoreManager implements vscode.Disposable {
         const filePath = document.uri.fsPath;
                 const relFile = path.relative(this.workspaceRoot, filePath).replace(/\\/g, '/');
 
-        const items = this.loreSnapshot.items.filter(i => i.file === relFile && i.state === 'active');
+        const items = this.loreSnapshot.items.filter((i: LoreItem) => i.file === relFile && i.state === 'active');
         if (items.length === 0) return;
 
         let hasChanges = false;

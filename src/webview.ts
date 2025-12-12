@@ -74,7 +74,7 @@ export function getWebviewContent(
             }
             input[type=text],
             textarea {
-                width: 100%;
+                width: 98%;
                 padding: 8px;
                 border-radius: 4px;
                 color: var(--vscode-input-foreground);
@@ -84,6 +84,12 @@ export function getWebviewContent(
             textarea {
                 min-height: 200px;
             }
+            .custom-multiselect .select-box {
+                width: auto;
+            }
+            .custom-multiselect .checkboxes-container {
+                width: auto;
+            }
             .custom-multiselect {
                 position: relative;
             }
@@ -92,7 +98,6 @@ export function getWebviewContent(
                 border-radius: 4px;
                 padding: 8px;
                 cursor: pointer;
-                width: 100%;
                 background: var(--vscode-input-background);
                 color: var(--vscode-input-foreground);
             }
@@ -102,7 +107,6 @@ export function getWebviewContent(
                 border: 1px solid var(--vscode-input-border);
                 border-top: none;
                 border-radius: 0 0 4px 4px;
-                width: 100%;
                 background: var(--vscode-editor-background);
                 z-index: 10;
             }

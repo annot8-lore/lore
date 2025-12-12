@@ -3,7 +3,7 @@ import * as path from 'path';
 import { marked, Token } from 'marked';
 import { ensureLoreFile } from './fsUtils';
 import { getWebviewContent } from './webview';
-import { LoreManager } from './LoreManager';
+import { LoreManager } from './LoreManager';lore
 import type { WebviewMessage, SavePayload, LoreItem } from './types';
 
 let loreManager: LoreManager;

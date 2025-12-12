@@ -51,21 +51,35 @@ export function getWebviewContent(
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>${mode === 'edit' ? 'Edit' : 'Create'} Lore</title>
         <style>
+            :root {
+                color-scheme: light dark;
+            }
             body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                font-family: var(--vscode-font-family);
+                padding: 0; /* Remove padding from body */
+                margin: 0;
+                background: var(--vscode-editor-background);
+                color: var(--vscode-editor-foreground);
+            }
+            #app-container {
                 padding: 16px;
+                // background-color: var(--vscode-editor-background, white);
+                // color: var(--vscode-editor-foreground, black);
             }
             label {
                 display: block;
                 margin-top: 12px;
                 font-weight: 600;
+                color: var(--vscode-editor-foreground);
             }
             input[type=text],
             textarea {
                 width: 100%;
                 padding: 8px;
                 border-radius: 4px;
-                border: 1px solid #ccc;
+                color: var(--vscode-input-foreground);
+                background: var(--vscode-input-background);
+                border: 1px solid var(--vscode-editor-border, var(--vscode-editorWidget-border));
             }
             textarea {
                 min-height: 200px;
@@ -74,20 +88,22 @@ export function getWebviewContent(
                 position: relative;
             }
             .select-box {
-                border: 1px solid #ccc;
+                border: 1px solid var(--vscode-input-border);
                 border-radius: 4px;
                 padding: 8px;
                 cursor: pointer;
                 width: 100%;
+                background: var(--vscode-input-background);
+                color: var(--vscode-input-foreground);
             }
             .checkboxes-container {
                 display: none;
                 position: absolute;
-                border: 1px solid #ccc;
+                border: 1px solid var(--vscode-input-border);
                 border-top: none;
                 border-radius: 0 0 4px 4px;
                 width: 100%;
-                background: var(--vscode-editor-background, white);
+                background: var(--vscode-editor-background);
                 z-index: 10;
             }
             .checkboxes-container label {
@@ -95,9 +111,10 @@ export function getWebviewContent(
                 padding: 8px;
                 margin-top: 0;
                 font-weight: normal;
+                color: var(--vscode-editor-foreground);
             }
             .checkboxes-container label:hover {
-                background-color: var(--vscode-dropdown-background, #eee);
+                background-color: var(--vscode-list-hoverBackground);
             }
             .checkboxes-container input[type="checkbox"] {
                 margin-right: 8px;
@@ -113,18 +130,27 @@ export function getWebviewContent(
                 border-radius: 4px;
                 border: none;
                 cursor: pointer;
+                background: var(--vscode-button-secondaryBackground);
+                color: var(--vscode-button-secondaryForeground);
+            }
+            button:hover {
+                background: var(--vscode-button-secondaryHoverBackground);
             }
             .primary {
-                background: #0066cc;
-                color: white;
+                background: var(--vscode-button-background);
+                color: var(--vscode-button-foreground);
+            }
+            .primary:hover {
+                background: var(--vscode-button-hoverBackground);
             }
             .muted {
-                color: #666;
+                color: var(--vscode-descriptionForeground);
                 font-size: 0.9em;
             }
         </style>
     </head>
     <body data-mode="${mode}" data-itemid="${itemId || ''}">
+      <div id="app-container">
         <h2>Lore — ${mode === 'edit' ? 'Edit' : 'Chronicle new'} lore</h2>
         <div class="muted">
             File: <strong>${escapeHtml(filePath)}</strong> • Lines: ${startLine}${startLine === endLine ? '' : '–' + endLine}
@@ -158,6 +184,7 @@ export function getWebviewContent(
             <button id="cancel">Cancel</button>
             <button id="save" class="primary">Save to .lore.json</button>
         </footer>
+      </div>
 
         <script nonce="${nonce}">
             const vscode = acquireVsCodeApi();

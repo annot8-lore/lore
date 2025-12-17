@@ -17,16 +17,20 @@ function debounce<T extends (...args: any[]) => void>(func: T, wait: number): (.
     };
 }
 
+interface LoreDecoration {
+  decoration: vscode.DecorationOptions;
+  item: LoreItem;
+}
+
 export class LoreManager implements vscode.Disposable {
+    private isHighlightingEnabled = false;
     private loreSnapshot: LoreSnapshot | null = null;
-    private commentRanges = new Map<string, { range: vscode.Range, item: LoreItem }[]>();
+    private commentRanges = new Map<string, LoreDecoration[]>();
     private readonly loreFilePath: string;
     private readonly workspaceRoot: string;
     private readonly decorationType: vscode.TextEditorDecorationType;
     private readonly onDidChangeLoreEmitter = new vscode.EventEmitter<void>();
     public readonly onDidChangeLore = this.onDidChangeLoreEmitter.event;
-
-    private isHighlightingEnabled = false;
 
     constructor(private context: vscode.ExtensionContext, workspaceRoot: string) {
         this.workspaceRoot = workspaceRoot;
@@ -75,15 +79,35 @@ export class LoreManager implements vscode.Disposable {
             if (item.location.startLine && item.location.endLine) {
                 const filePath = path.join(this.workspaceRoot, item.file);
                 const range = new vscode.Range(item.location.startLine - 1, 0, item.location.endLine - 1, 0);
+
+                const editCommandUri = vscode.Uri.parse(
+                    `command:lore.editComment?${encodeURIComponent(JSON.stringify([item.id]))}`
+                );
+        
+                const previewCommandUri = vscode.Uri.parse(
+                    `command:lore.previewMarkdown?${encodeURIComponent(JSON.stringify([item.id]))}`
+                );
+        
+                const truncatedBody = (item.bodyMarkdown || '').substring(0, 100);
+                const mdContent = `# ${item.summary}\n\n${truncatedBody}${(item.bodyMarkdown || '').length > 100 ? '...' : ''}\n\n---\n[Edit Lore](${editCommandUri}) | [View Lore](${previewCommandUri})`;
+        
+                const markdown = new vscode.MarkdownString(mdContent, true);
+                markdown.isTrusted = true;
+
+                const decoration: vscode.DecorationOptions = {
+                    range,
+                    hoverMessage: markdown,
+                };
+
                 if (!this.commentRanges.has(filePath)) {
                     this.commentRanges.set(filePath, []);
                 }
-                this.commentRanges.get(filePath)!.push({ range, item });
+                this.commentRanges.get(filePath)!.push({ decoration, item });
             }
         }
     }
 
-    public getLoreItemsForFile(filePath: string): { range: vscode.Range, item: LoreItem }[] {
+    public getLoreItemsForFile(filePath: string): LoreDecoration[] {
         return this.commentRanges.get(filePath) || [];
     }
 
@@ -183,66 +207,58 @@ export class LoreManager implements vscode.Disposable {
 
     private saveLoreDebounced = debounce(this.saveLore, 500); // Debounce by 500ms
 
-    public async adjustLoreLocations(document: vscode.TextDocument, contentChanges: readonly vscode.TextDocumentContentChangeEvent[]) {
-        if (!this.loreSnapshot || !this.workspaceRoot) return;
-
+    public adjustLoreLocations(event: vscode.TextDocumentChangeEvent) {
+        const { document, contentChanges } = event;
         const filePath = document.uri.fsPath;
-                const relFile = path.relative(this.workspaceRoot, filePath).replace(/\\/g, '/');
+        const loreForFile = this.commentRanges.get(filePath);
 
-        const items = this.loreSnapshot.items.filter((i: LoreItem) => i.file === relFile && i.state === 'active');
-        if (items.length === 0) return;
+        if (!loreForFile || loreForFile.length === 0) {
+            return;
+        }
 
         let hasChanges = false;
-
         for (const change of contentChanges) {
-            const newLines = (change.text.match(/\n/g) || []).length;
-            const oldLines = change.range.end.line - change.range.start.line;
-            const delta = newLines - oldLines;
-
+            const delta = (change.text.match(/\n/g) || []).length - (change.range.end.line - change.range.start.line);
             if (delta === 0) continue;
 
             hasChanges = true;
-            // Adjust each lore item's location
-            for (const item of items) {
-                let start = item.location.startLine - 1; // Convert to 0-based
-                let end = item.location.endLine - 1;
+            const changeStartLine = change.range.start.line;
 
-                const changeStartLine = change.range.start.line;
+            for (const lore of loreForFile) {
+                let start = lore.decoration.range.start.line;
+                let end = lore.decoration.range.end.line;
 
-                // If the change starts before the lore item, shift the whole item
                 if (changeStartLine < start) {
                     start += delta;
                     end += delta;
-                }
-                // If the change is within the lore item (but not at the start)
-                else if (changeStartLine >= start && changeStartLine <= end) {
+                } else if (changeStartLine >= start && changeStartLine <= end) {
                     end += delta;
                 }
 
-                // Ensure end doesn't go below start
                 if (end < start) {
                     end = start;
                 }
 
-                // Update with 1-based line numbers, ensure minimum of 1
-                item.location.startLine = Math.max(1, start + 1);
-                item.location.endLine = Math.max(1, end + 1);
+                lore.decoration.range = new vscode.Range(start, 0, end, 0);
+                
+                // Also update the canonical item in the snapshot
+                lore.item.location.startLine = start + 1;
+                lore.item.location.endLine = end + 1;
             }
         }
 
         if (hasChanges) {
-            this.loreSnapshot.fileMetadata.lastUpdatedAt = nowISO();
-            this.saveLoreDebounced();
-            this.updateCommentRanges();
             this.refreshDecorations();
-            this.onDidChangeLoreEmitter.fire(); // Notify listeners
+            this.saveLoreDebounced();
         }
     }
 
+
+
     public refreshDecorations() {
         for (const editor of vscode.window.visibleTextEditors) {
-            const ranges = this.isHighlightingEnabled ? (this.commentRanges.get(editor.document.uri.fsPath) || []) : [];
-            editor.setDecorations(this.decorationType, ranges.map(r => r.range));
+            const decorations = this.isHighlightingEnabled ? (this.commentRanges.get(editor.document.uri.fsPath) || []) : [];
+            editor.setDecorations(this.decorationType, decorations.map(d => d.decoration));
         }
     }
 
@@ -250,8 +266,16 @@ export class LoreManager implements vscode.Disposable {
         return this.isHighlightingEnabled;
     }
 
+    public toggleHighlights() {
+        this.isHighlightingEnabled = !this.isHighlightingEnabled;
+        this.refreshDecorations();
+        this.onDidChangeLoreEmitter.fire(); // To update status bar and codelens
+    }
+
     public enableHighlights() {
         this.isHighlightingEnabled = true;
+        this.refreshDecorations();
+        this.onDidChangeLoreEmitter.fire();
     }
 
     public clearDecorations() {

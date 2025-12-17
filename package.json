@@ -18,29 +18,41 @@
     "commands": [
       {
         "command": "lore.createEnrichedComment",
-        "title": "Lore: Chronicle new lore"
+        "title": "Lore: Weave new Lore"
       },
       {
-        "command": "lore.showEnrichedComments",
-        "title": "Lore: Show enriched comments"
-      },
-      {
-        "command": "lore.editComment",
-        "title": "Edit comment"
-      },
-      {
-        "command": "lore.previewMarkdown",
-        "title": "Open comment"
-      },
-      {
-        "command": "lore.testWebview",
-        "title": "Test Webview"
+        "command": "lore.enableHighlights",
+        "title": "Lore: Summon Highlights"
       },
       {
         "command": "lore.disableHighlights",
-        "title": "Lore: Disable Highlights"
+        "title": "Lore: Seal Highlights"
+      },
+      {
+        "command": "lore.editComment",
+        "title": "Lore: Patch the Lore"
+      },
+      {
+        "command": "lore.previewMarkdown",
+        "title": "Lore: View Lore Entry"
+      },
+      {
+        "command": "lore.listAllEntries",
+        "title": "Lore: Reveal all Entries"
       }
-    ]
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "lore.editComment",
+          "when": "false"
+        },
+        {
+          "command": "lore.previewMarkdown",
+          "when": "false"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run compile",

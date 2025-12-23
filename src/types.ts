@@ -6,6 +6,7 @@ export const LORE_CATEGORIES = [
   'Bug Fix',
   'Onboarding/Explanation',
   'Open Question',
+  'Known Bug'
 ];
 
 export interface LoreLocation {

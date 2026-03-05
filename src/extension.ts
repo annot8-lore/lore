@@ -265,6 +265,13 @@ export function activate(context: vscode.ExtensionContext) {
     loreManager.adjustLoreLocations(event);
   });
 
+  // update lore entries when files are renamed or moved in the workspace
+  vscode.workspace.onDidRenameFiles(async (e) => {
+    if (loreManager) {
+      await loreManager.handleFileRenames(e);
+    }
+  });
+
   // Listen for changes in LoreManager to refresh CodeLens and Status Bar
   loreManager.onDidChangeLore(() => {
     vscode.commands.executeCommand('editor.action.codeLensRefresh');

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { ensureLoreFile, readJson, safeWriteJson, nowISO } from './fsUtils';
+import { createHash } from 'crypto';
 import type { LoreSnapshot, LoreItem, SavePayload } from './types';
 
 // Debounce utility to prevent excessive file writes
@@ -52,6 +53,10 @@ export class LoreManager implements vscode.Disposable {
     private async loadLore() {
         try {
             this.loreSnapshot = await readJson<LoreSnapshot>(this.loreFilePath);
+
+            // attempt to repair any items whose stored line numbers no longer exist
+            await this.reanchorItems();
+
             this.updateCommentRanges();
             this.refreshDecorations();
             this.onDidChangeLoreEmitter.fire(); // Notify listeners that lore has changed
@@ -72,6 +77,7 @@ export class LoreManager implements vscode.Disposable {
     }
 
     private updateCommentRanges() {
+        // rebuild cache of ranges without touching the highlighting flag
         this.commentRanges.clear();
         if (!this.loreSnapshot) return;
 
@@ -111,12 +117,80 @@ export class LoreManager implements vscode.Disposable {
         return this.commentRanges.get(filePath) || [];
     }
 
+    /**
+     * Update items when files are renamed in the workspace.
+     * `event` is the object received from `workspace.onDidRenameFiles`.
+     */
+    public async handleFileRenames(event: vscode.FileRenameEvent) {
+        if (!this.loreSnapshot) return;
+        let mutated = false;
+        for (const change of event.files) {
+            const oldRel = path.relative(this.workspaceRoot, change.oldUri.fsPath);
+            const newRel = path.relative(this.workspaceRoot, change.newUri.fsPath);
+            for (const item of this.loreSnapshot.items) {
+                if (item.file === oldRel) {
+                    item.file = newRel;
+                    mutated = true;
+                }
+            }
+        }
+        if (mutated) {
+            this.updateCommentRanges();
+            this.refreshDecorations();
+            this.saveLoreDebounced();
+        }
+    }
+
     public getLoreItemById(id: string): LoreItem | undefined {
         return this.loreSnapshot?.items.find((item: LoreItem) => item.id === id);
     }
 
     public getAllLoreItems(): LoreItem[] {
         return this.loreSnapshot?.items || [];
+    }
+
+    // attempt to reposition items whose range is out of bounds using anchor text/hash
+    private async reanchorItems() {
+        if (!this.loreSnapshot) return;
+        for (const item of this.loreSnapshot.items) {
+            const absPath = path.join(this.workspaceRoot, item.file);
+            let doc: vscode.TextDocument | null = null;
+            try {
+                doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absPath));
+            } catch {
+                continue; // file deleted or not openable
+            }
+
+            const lineCount = doc.lineCount;
+            if (item.location.startLine > lineCount || item.location.startLine < 1) {
+                // try to search using anchorText first
+                if (item.location.anchorText) {
+                    const idx = doc.getText().indexOf(item.location.anchorText);
+                    if (idx !== -1) {
+                        const pos = doc.positionAt(idx);
+                        const lines = item.location.anchorText.split('\n').length;
+                        item.location.startLine = pos.line + 1;
+                        item.location.endLine = pos.line + lines;
+                        continue;
+                    }
+                }
+                // fallback: search whole file for hash match (rare)
+                if (item.location.lineHash) {
+                    const text = doc.getText();
+                    // naive sliding window
+                    const lines = text.split(/\r?\n/);
+                    for (let i = 0; i < lines.length; i++) {
+                        const snippet = lines.slice(i, i + 1).join('\n');
+                        const h = createHash('sha1').update(snippet).digest('hex');
+                        if (h === item.location.lineHash) {
+                            item.location.startLine = i + 1;
+                            item.location.endLine = i + 1;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public async reloadLore() {
@@ -131,22 +205,41 @@ export class LoreManager implements vscode.Disposable {
             }
         }
 
-        const makeNewItem = (id?: string): LoreItem => ({
-            id: id ?? uuidv4(),
-            state: 'active',
-            file: payload.file || relFile,
-            location: { startLine: payload.startLine || startLine, endLine: payload.endLine || endLine },
-            summary: payload.summary || '',
-            bodyMarkdown: payload.body || '',
-            tags: payload.tags || [],
-            links: payload.links || [],
-            author: payload.author || '',
-            createdAt: nowISO(),
-            updatedAt: nowISO(),
-            contentType: 'markdown',
-            isTrusted: false,
-            categories: payload.categories || [], // New field
-        });
+        // helper: read snippet & compute anchor data
+        const computeAnchor = async (file: string, s: number, e: number) => {
+            try {
+                const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(path.join(this.workspaceRoot, file)));
+                const anchorText = doc.getText(new vscode.Range(s - 1, 0, e - 1, doc.lineAt(e - 1).text.length)).trim();
+                const contextStart = Math.max(0, s - 2);
+                const contextEnd = Math.min(doc.lineCount - 1, e);
+                const contextLines = doc.getText(new vscode.Range(contextStart, 0, contextEnd, doc.lineAt(contextEnd).text.length)).trim();
+                const hash = createHash('sha1').update(anchorText).digest('hex');
+                return { anchorText, contextPreview: contextLines, lineHash: hash };
+            } catch {
+                return { anchorText: '', contextPreview: '', lineHash: '' };
+            }
+        };
+
+        const makeNewItem = async (id?: string): Promise<LoreItem> => {
+            const loc = { startLine: payload.startLine || startLine, endLine: payload.endLine || endLine };
+            const anchorData = await computeAnchor(payload.file || relFile, loc.startLine, loc.endLine);
+            return {
+                id: id ?? uuidv4(),
+                state: 'active',
+                file: payload.file || relFile,
+                location: { ...loc, ...anchorData },
+                summary: payload.summary || '',
+                bodyMarkdown: payload.body || '',
+                tags: payload.tags || [],
+                links: payload.links || [],
+                author: payload.author || '',
+                createdAt: nowISO(),
+                updatedAt: nowISO(),
+                contentType: 'markdown',
+                isTrusted: false,
+                categories: payload.categories || [], // New field
+            };
+        };
 
         let itemId: string;
 
@@ -154,15 +247,17 @@ export class LoreManager implements vscode.Disposable {
             const idx = this.loreSnapshot.items.findIndex((i: LoreItem) => i.id === payload.id);
             if (idx >= 0) {
                 const existing = this.loreSnapshot.items[idx];
+                const loc = {
+                    startLine: payload.startLine || startLine || existing.location.startLine,
+                    endLine: payload.endLine || endLine || existing.location.endLine,
+                };
+                const anchorData = await computeAnchor(payload.file || relFile || existing.file, loc.startLine, loc.endLine);
                 const updated: LoreItem = {
                     ...existing,
                     file: payload.file || relFile || existing.file,
                     location: {
-                        startLine: payload.startLine || startLine || existing.location.startLine,
-                        endLine: payload.endLine || endLine || existing.location.endLine,
-                        anchorText: existing.location?.anchorText,
-                        contextPreview: existing.location?.contextPreview,
-                        lineHash: existing.location?.lineHash
+                        ...loc,
+                        ...anchorData,
                     },
                     summary: payload.summary ?? existing.summary,
                     bodyMarkdown: payload.body ?? existing.bodyMarkdown,
@@ -175,12 +270,12 @@ export class LoreManager implements vscode.Disposable {
                 this.loreSnapshot.items[idx] = updated;
                 itemId = updated.id;
             } else {
-                const created = makeNewItem(payload.id);
+                const created = await makeNewItem(payload.id);
                 this.loreSnapshot.items.push(created);
                 itemId = created.id;
             }
         } else {
-            const created = makeNewItem();
+            const created = await makeNewItem();
             this.loreSnapshot.items.push(created);
             itemId = created.id;
         }
@@ -212,6 +307,7 @@ export class LoreManager implements vscode.Disposable {
         const filePath = document.uri.fsPath;
         const loreForFile = this.commentRanges.get(filePath);
 
+        // always operate on the cache even if highlights are off
         if (!loreForFile || loreForFile.length === 0) {
             return;
         }
@@ -235,6 +331,8 @@ export class LoreManager implements vscode.Disposable {
                     end += delta;
                 }
 
+                // clamp negatives
+                if (start < 0) start = 0;
                 if (end < start) {
                     end = start;
                 }
@@ -268,6 +366,12 @@ export class LoreManager implements vscode.Disposable {
 
     public toggleHighlights() {
         this.isHighlightingEnabled = !this.isHighlightingEnabled;
+        if (this.isHighlightingEnabled) {
+            // ensure cache available
+            if (!this.commentRanges.size) {
+                this.updateCommentRanges();
+            }
+        }
         this.refreshDecorations();
         this.onDidChangeLoreEmitter.fire(); // To update status bar and codelens
     }
@@ -280,7 +384,7 @@ export class LoreManager implements vscode.Disposable {
 
     public clearDecorations() {
         this.isHighlightingEnabled = false;
-        this.commentRanges.clear();
+        // keep commentRanges intact; we only disable visuals
         for (const editor of vscode.window.visibleTextEditors) {
             editor.setDecorations(this.decorationType, []);
         }

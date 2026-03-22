@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { promises as fsp } from 'fs';
-import { LoreSnapshot } from './types';
+import { LoreSnapshot, LoreItem } from './types';
 
 const LORE_FILE = '.lore.json';
 
@@ -58,6 +58,24 @@ export function nowISO() {
   return new Date().toISOString();
 }
 
+/**
+ * Migrates a raw parsed snapshot to the current schema version.
+ * v1 → v2: converts flat items array to Record<relPath, LoreItem[]>.
+ */
+export function migrateSnapshot(raw: unknown): LoreSnapshot {
+  const snap = raw as { schemaVersion?: number; items?: unknown } & LoreSnapshot;
+  if (snap.schemaVersion === 1 && Array.isArray(snap.items)) {
+    const keyed: Record<string, LoreItem[]> = {};
+    for (const item of snap.items as LoreItem[]) {
+      const key = item.file ?? '';
+      if (!keyed[key]) { keyed[key] = []; }
+      keyed[key].push(item);
+    }
+    return { ...snap, schemaVersion: 2, items: keyed };
+  }
+  return snap as LoreSnapshot;
+}
+
 // Ensure .lore.json exists at the workspace root and return its path.
 export function ensureLoreFile(root: string): Promise<string> {
   // Return a cached promise if present to deduplicate concurrent calls.
@@ -71,7 +89,7 @@ export function ensureLoreFile(root: string): Promise<string> {
       return filePath;
     } catch {
       const initial: LoreSnapshot = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         fileMetadata: {
           workspace: path.basename(root),
           createdAt: nowISO(),
@@ -79,7 +97,7 @@ export function ensureLoreFile(root: string): Promise<string> {
           lastUpdatedBy: ''
         },
         indexes: { tags: {}, filesWithComments: 0 },
-        items: []
+        items: {}
       };
 
       await safeWriteJson(filePath, initial);

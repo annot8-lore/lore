@@ -54,10 +54,15 @@ export type SavePayload = {
   categories?: string[]; // New field
 };
 
-export type WebviewMessage = SavePayload | { command: 'cancel' } | { command: 'edit', id: string };
+export type WebviewMessage =
+  | SavePayload
+  | { command: 'cancel' }
+  | { command: 'edit'; id: string }
+  | { command: 'delete'; id: string }
+  | { command: 'archive'; id: string };
 
 export interface LoreSnapshot {
-  schemaVersion: number;
+  schemaVersion: number; // v2: items keyed by relative file path (reduces git conflicts)
   fileMetadata: Record<string, unknown> & {
     workspace?: string;
     createdAt: string;
@@ -66,5 +71,5 @@ export interface LoreSnapshot {
     repoCommit?: string;
   };
   indexes: { tags: Record<string, number>; filesWithComments: number };
-  items: LoreItem[];
+  items: Record<string, LoreItem[]>; // key = relative file path
 }

@@ -1,6 +1,8 @@
 # Ignore internal documentation folder
 docs/internal/
 GEMINI.md
+CLAUDE.md
+Issues.md
 
 # JS files
 node_modules/

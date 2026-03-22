@@ -18,12 +18,14 @@ Lore allows developers to create enriched inline comments that:
 ## Features
 
 - **Create Comments**: Use the Command Palette to add enriched comments to code selections
+- **Categories**: Tag entries as Architectural Decision, Tech Debt, Bug Fix, and more
 - **Hover Previews**: See comment summaries and links on hover
 - **Code Lens Actions**: Quick access to edit or view full comments
 - **Highlight Comments**: Visually highlight lines with associated comments
+- **Live Line Tracking**: Annotations follow code as you edit — no manual re-pinning
 - **Markdown Support**: Rich text formatting in comment bodies
 - **Local Storage**: All data stored in `.lore.json` (no external dependencies)
-- **Safe Writes**: Atomic file operations to prevent data loss
+- **Safe Writes**: Atomic file operations (write → fsync → rename) to prevent data loss
 
 ## Installation
 
@@ -36,8 +38,7 @@ Lore allows developers to create enriched inline comments that:
 2. Install dependencies:
 ```bash
 pnpm install
-````
-
+```
 3. Build the extension:
 ```bash
 pnpm run compile
@@ -51,19 +52,20 @@ pnpm run compile
 2. __Create a comment__:
 
    - Select code lines (optional)
-   - Run `Lore: Chronicle new lore` from the Command Palette (`Ctrl+Shift+P`)
-   - Fill in summary and markdown details
-   - Save to create the comment
+   - Run `Lore: Weave new Lore` from the Command Palette (`Ctrl+Shift+P`)
+   - Fill in summary, markdown body, and optional categories/author
+   - Click **Save to .lore.json**
 
 3. __View comments__:
 
-   - Run `Lore: Show enriched comments` to highlight commented lines
-   - Hover over highlighted lines to see previews
-   - Use Code Lens actions to edit or view full comments
-   (or)
-   - Use buttons on preview pane to edit or view fill comments
+   - Run `Lore: Summon Highlights` to highlight annotated lines
+   - Hover over a highlighted line to see a preview with quick-action links
+   - Use Code Lens **Edit Lore** / **View Lore** actions above annotated lines
+   - Run `Lore: Reveal all Entries` to browse and jump to any annotation
 
-4. __Edit comments__: Click "Edit Lore" in Code Lens or hover menu
+4. __Edit a comment__: Click **Edit Lore** in Code Lens, the hover tooltip, or run `Lore: Patch the Lore`
+
+5. __Hide highlights__: Run `Lore: Seal Highlights` or click the `$(eye) Lore` status bar item
 
 Comments are stored in `.lore.json` at the workspace root. See `docs/.lore.sample.json` for the file format.
 
@@ -76,15 +78,16 @@ Contributions are welcome. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 1. Install dependencies: `pnpm install`
 2. Build: `pnpm run compile`
 3. Watch for changes: `pnpm run watch`
-<!-- 4. Test: `pnpm run test` -->
-5. Launch Extension Development Host: Press `F5` in VS Code
+4. Launch Extension Development Host: Press `F5` in VS Code
 
 ### Commands Available
 
-- `Lore: Chronicle new lore` - Create new comment
-- `Lore: Show enriched comments` - Highlight commented lines
-<!-- - `Lore: Edit comment` - Edit existing comment -->
-<!-- - `Lore: Open comment` - Preview full markdown -->
+| Command | Description |
+|---|---|
+| `Lore: Weave new Lore` | Create a new annotation |
+| `Lore: Summon Highlights` | Highlight all annotated lines |
+| `Lore: Seal Highlights` | Hide all highlights |
+| `Lore: Reveal all Entries` | Browse and jump to any annotation |
 
 ## Roadmap
 

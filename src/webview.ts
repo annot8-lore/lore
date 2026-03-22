@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { LORE_CATEGORIES } from './types'; // Import LORE_CATEGORIES
+import { LORE_CATEGORIES } from './types';
 
 function escapeHtml(unsafe: string): string {
     return unsafe.replace(/[&<"'>]/g, (c) => {
@@ -15,12 +15,10 @@ function escapeHtml(unsafe: string): string {
 }
 
 function getNonce(): string {
-    return Math.random().toString(36).slice(2, 12);
+    const { randomBytes } = require('crypto') as typeof import('crypto');
+    return randomBytes(16).toString('hex');
 }
 
-/**
- * Generates the HTML content for the create/edit webview.
- */
 export function getWebviewContent(
     cspSource: string,
     extensionUri: vscode.Uri,
@@ -32,9 +30,12 @@ export function getWebviewContent(
     initialBody = '',
     initialAuthor: string = '',
     itemId?: string,
-    initialCategories: string[] = []
+    initialCategories: string[] = [],
+    initialTags: string[] = [],
+    initialLinks: string[] = [],
 ): string {
     const nonce = getNonce();
+    const isEdit = mode === 'edit';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -49,50 +50,40 @@ export function getWebviewContent(
                 font-src ${cspSource} vscode-resource:;
             " />
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${mode === 'edit' ? 'Edit' : 'Create'} Lore</title>
+        <title>${isEdit ? 'Edit' : 'Create'} Lore</title>
         <style>
-            :root {
-                color-scheme: light dark;
-            }
+            :root { color-scheme: light dark; }
             body {
                 font-family: var(--vscode-font-family);
-                padding: 0; /* Remove padding from body */
+                padding: 0;
                 margin: 0;
                 background: var(--vscode-editor-background);
                 color: var(--vscode-editor-foreground);
             }
-            #app-container {
-                padding: 16px;
-                // background-color: var(--vscode-editor-background, white);
-                // color: var(--vscode-editor-foreground, black);
-            }
+            #app-container { padding: 16px; }
             label {
                 display: block;
                 margin-top: 12px;
                 font-weight: 600;
                 color: var(--vscode-editor-foreground);
             }
-            input[type=text],
-            textarea {
+            input[type=text], textarea {
                 width: 98%;
                 padding: 8px;
                 border-radius: 4px;
                 color: var(--vscode-input-foreground);
                 background: var(--vscode-input-background);
                 border: 1px solid var(--vscode-editor-border, var(--vscode-editorWidget-border));
+                box-sizing: border-box;
             }
-            textarea {
-                min-height: 200px;
+            textarea { min-height: 200px; }
+            textarea.links { min-height: 72px; }
+            .hint {
+                font-size: 0.82em;
+                color: var(--vscode-descriptionForeground);
+                margin-top: 3px;
             }
-            .custom-multiselect .select-box {
-                width: auto;
-            }
-            .custom-multiselect .checkboxes-container {
-                width: auto;
-            }
-            .custom-multiselect {
-                position: relative;
-            }
+            .custom-multiselect { position: relative; }
             .select-box {
                 border: 1px solid var(--vscode-input-border);
                 border-radius: 4px;
@@ -100,6 +91,8 @@ export function getWebviewContent(
                 cursor: pointer;
                 background: var(--vscode-input-background);
                 color: var(--vscode-input-foreground);
+                width: 98%;
+                box-sizing: border-box;
             }
             .checkboxes-container {
                 display: none;
@@ -109,6 +102,7 @@ export function getWebviewContent(
                 border-radius: 0 0 4px 4px;
                 background: var(--vscode-editor-background);
                 z-index: 10;
+                width: 98%;
             }
             .checkboxes-container label {
                 display: block;
@@ -117,18 +111,16 @@ export function getWebviewContent(
                 font-weight: normal;
                 color: var(--vscode-editor-foreground);
             }
-            .checkboxes-container label:hover {
-                background-color: var(--vscode-list-hoverBackground);
-            }
-            .checkboxes-container input[type="checkbox"] {
-                margin-right: 8px;
-            }
+            .checkboxes-container label:hover { background-color: var(--vscode-list-hoverBackground); }
+            .checkboxes-container input[type="checkbox"] { margin-right: 8px; }
             footer {
-                margin-top: 16px;
+                margin-top: 20px;
                 display: flex;
                 justify-content: flex-end;
                 gap: 8px;
+                flex-wrap: wrap;
             }
+            .footer-left { margin-right: auto; display: flex; gap: 8px; }
             button {
                 padding: 8px 12px;
                 border-radius: 4px;
@@ -137,25 +129,24 @@ export function getWebviewContent(
                 background: var(--vscode-button-secondaryBackground);
                 color: var(--vscode-button-secondaryForeground);
             }
-            button:hover {
-                background: var(--vscode-button-secondaryHoverBackground);
-            }
+            button:hover { background: var(--vscode-button-secondaryHoverBackground); }
             .primary {
                 background: var(--vscode-button-background);
                 color: var(--vscode-button-foreground);
             }
-            .primary:hover {
-                background: var(--vscode-button-hoverBackground);
+            .primary:hover { background: var(--vscode-button-hoverBackground); }
+            .destructive {
+                background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+                color: var(--vscode-inputValidation-errorForeground, #f48771);
+                border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
             }
-            .muted {
-                color: var(--vscode-descriptionForeground);
-                font-size: 0.9em;
-            }
+            .destructive:hover { opacity: 0.85; }
+            .muted { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
         </style>
     </head>
     <body data-mode="${mode}" data-itemid="${itemId || ''}">
       <div id="app-container">
-        <h2>Lore — ${mode === 'edit' ? 'Edit' : 'Chronicle new'} lore</h2>
+        <h2>Lore — ${isEdit ? 'Edit' : 'Chronicle new'} lore</h2>
         <div class="muted">
             File: <strong>${escapeHtml(filePath)}</strong> • Lines: ${startLine}${startLine === endLine ? '' : '–' + endLine}
         </div>
@@ -181,10 +172,23 @@ export function getWebviewContent(
             </div>
         </div>
 
-        <label for="author">Author (optional)</label>
+        <label for="tags">Tags</label>
+        <input id="tags" type="text" placeholder="design, performance, auth" value="${escapeHtml(initialTags.join(', '))}" />
+        <div class="hint">Comma-separated</div>
+
+        <label for="links">Links</label>
+        <textarea id="links" class="links" placeholder="https://notion.so/... &#10;https://github.com/...">${escapeHtml(initialLinks.join('\n'))}</textarea>
+        <div class="hint">One URL per line</div>
+
+        <label for="author">Author</label>
         <input id="author" type="text" placeholder="Name or email" value="${escapeHtml(initialAuthor)}" />
 
         <footer>
+            ${isEdit ? `
+            <div class="footer-left">
+                <button id="archive">Archive</button>
+                <button id="delete" class="destructive">Delete</button>
+            </div>` : ''}
             <button id="cancel">Cancel</button>
             <button id="save" class="primary">Save to .lore.json</button>
         </footer>
@@ -195,8 +199,9 @@ export function getWebviewContent(
             const saveBtn = document.getElementById('save');
             const cancelBtn = document.getElementById('cancel');
             const itemId = document.body.dataset.itemid;
-            
-            // Custom dropdown logic
+            const isEdit = document.body.dataset.mode === 'edit';
+
+            // ── Categories dropdown ──────────────────────────────────────────
             const selectBox = document.querySelector('.select-box');
             const checkboxesContainer = document.querySelector('.checkboxes-container');
             const selectedOptionsSpan = document.querySelector('.selected-options');
@@ -216,15 +221,10 @@ export function getWebviewContent(
 
             selectBox.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (expanded) {
-                    checkboxesContainer.style.display = 'none';
-                } else {
-                    checkboxesContainer.style.display = 'block';
-                }
                 expanded = !expanded;
+                checkboxesContainer.style.display = expanded ? 'block' : 'none';
             });
 
-            // Close dropdown if clicking outside
             document.addEventListener('click', (e) => {
                 if (!checkboxesContainer.contains(e.target)) {
                     checkboxesContainer.style.display = 'none';
@@ -232,17 +232,19 @@ export function getWebviewContent(
                 }
             });
 
-            checkboxes.forEach(checkbox => {
-                checkbox.addEventListener('change', updateSelectedText);
-            });
-            
-            // Initial text update
+            checkboxes.forEach(cb => cb.addEventListener('change', updateSelectedText));
             updateSelectedText();
 
+            // ── Save ─────────────────────────────────────────────────────────
             saveBtn.addEventListener('click', () => {
                 const selectedCategories = Array.from(checkboxes)
-                                            .filter(option => option.checked)
-                                            .map(option => option.value);
+                    .filter(c => c.checked).map(c => c.value);
+
+                const rawTags = document.getElementById('tags').value;
+                const tags = rawTags.split(',').map(t => t.trim()).filter(t => t.length > 0);
+
+                const rawLinks = document.getElementById('links').value;
+                const links = rawLinks.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
 
                 vscode.postMessage({
                     command: 'save',
@@ -253,13 +255,26 @@ export function getWebviewContent(
                     summary: document.getElementById('summary').value,
                     body: document.getElementById('body').value,
                     author: document.getElementById('author').value,
-                    categories: selectedCategories
+                    categories: selectedCategories,
+                    tags,
+                    links,
                 });
             });
 
             cancelBtn.addEventListener('click', () => {
                 vscode.postMessage({ command: 'cancel' });
             });
+
+            // ── Archive / Delete (edit mode only) ────────────────────────────
+            if (isEdit) {
+                document.getElementById('archive').addEventListener('click', () => {
+                    vscode.postMessage({ command: 'archive', id: itemId });
+                });
+
+                document.getElementById('delete').addEventListener('click', () => {
+                    vscode.postMessage({ command: 'delete', id: itemId });
+                });
+            }
         </script>
     </body>
 </html>`;

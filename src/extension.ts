@@ -1,60 +1,78 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { marked, Token } from 'marked';
-import { ensureLoreFile } from './fsUtils';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { Marked } from 'marked';
+import type { Token } from 'marked';
 import { getWebviewContent } from './webview';
 import { LoreManager } from './LoreManager';
-import type { WebviewMessage, SavePayload, LoreItem } from './types';
+import type { WebviewMessage, SavePayload } from './types';
+
+const execFileAsync = promisify(execFile);
+
+async function getGitAuthor(cwd: string): Promise<string> {
+  try {
+    const [nameResult, emailResult] = await Promise.allSettled([
+      execFileAsync('git', ['config', 'user.name'], { cwd }),
+      execFileAsync('git', ['config', 'user.email'], { cwd }),
+    ]);
+    const name = nameResult.status === 'fulfilled' ? nameResult.value.stdout.trim() : '';
+    const email = emailResult.status === 'fulfilled' ? emailResult.value.stdout.trim() : '';
+    if (name && email) { return `${name} <${email}>`; }
+    return name || email;
+  } catch {
+    return '';
+  }
+}
 
 let loreManager: LoreManager;
 let statusBarItem: vscode.StatusBarItem;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   console.log('Lore extension activating');
 
-  // Create status bar item
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   context.subscriptions.push(statusBarItem);
 
-  const updateStatusBar = () => {
-    if (loreManager.getIsHighlightingEnabled()) {
-      statusBarItem.text = `$(eye) Lore: On`;
-      statusBarItem.tooltip = 'Click to hide Lore highlights';
-      statusBarItem.command = 'lore.toggleHighlights';
-    } else {
-      statusBarItem.text = `$(eye-closed) Lore: Off`;
-      statusBarItem.tooltip = 'Click to show Lore highlights';
-      statusBarItem.command = 'lore.toggleHighlights';
-    }
-    statusBarItem.show();
-  };
-
-  const toggleHighlightsCommand = vscode.commands.registerCommand('lore.toggleHighlights', () => {
-    loreManager.toggleHighlights();
-  });
-  context.subscriptions.push(toggleHighlightsCommand);
-
-  if (vscode.workspace.workspaceFolders?.length) {
-    const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
-    loreManager = new LoreManager(context, root);
-  } else {
+  if (!vscode.workspace.workspaceFolders?.length) {
     vscode.window.showErrorMessage('Lore extension requires an open workspace.');
     return;
   }
-  
+
+  const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+  loreManager = await LoreManager.create(context, root);
+
+  const updateStatusBar = () => {
+    statusBarItem.text = loreManager.getIsHighlightingEnabled() ? `$(eye) Lore: On` : `$(eye-closed) Lore: Off`;
+    statusBarItem.tooltip = loreManager.getIsHighlightingEnabled() ? 'Click to hide Lore highlights' : 'Click to show Lore highlights';
+    statusBarItem.command = 'lore.toggleHighlights';
+    statusBarItem.show();
+  };
+
   updateStatusBar();
 
-  // Create new Lore entry
+  const codeLensEmitter = new vscode.EventEmitter<void>();
+  context.subscriptions.push(codeLensEmitter);
+
+  loreManager.onDidChangeLore(() => {
+    codeLensEmitter.fire();
+    updateStatusBar();
+  });
+
+  // ── Commands ──────────────────────────────────────────────────────────────
+
+  const toggleHighlightsCommand = vscode.commands.registerCommand('lore.toggleHighlights', () => {
+    loreManager.toggleHighlights();
+    codeLensEmitter.fire();
+    updateStatusBar();
+  });
+
   const createCommand = vscode.commands.registerCommand('lore.createEnrichedComment', async () => {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) {
       vscode.window.showErrorMessage('Open a workspace before creating lore entries.');
       return;
     }
-
-    const root = folders[0].uri.fsPath;
-    // ensureLoreFile is now handled by LoreManager constructor
-    // await ensureLoreFile(root);
 
     const editor = vscode.window.activeTextEditor;
     let relFile = '';
@@ -63,16 +81,17 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (editor) {
       relFile = path.relative(root, editor.document.uri.fsPath);
-      const sel = editor.selection;
-      startLine = sel.start.line + 1;
-      endLine = sel.end.line + 1;
+      startLine = editor.selection.start.line + 1;
+      endLine = editor.selection.end.line + 1;
     }
+
+    const gitAuthor = await getGitAuthor(root);
 
     const panel = vscode.window.createWebviewPanel(
       'loreCreate',
       'Lore — Chronicle new lore',
       vscode.ViewColumn.Beside,
-      { enableScripts: true, retainContextWhenHidden: false }
+      { enableScripts: true, retainContextWhenHidden: false },
     );
 
     panel.webview.html = getWebviewContent(
@@ -81,84 +100,48 @@ export function activate(context: vscode.ExtensionContext) {
       relFile,
       startLine,
       endLine,
-      'create'
+      'create',
+      '',
+      '',
+      gitAuthor,
     );
 
     const disposables: vscode.Disposable[] = [];
 
-      panel.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
-        if (msg.command === 'save') {
-          try {
-            await loreManager.upsertLoreItem(msg as SavePayload, relFile, startLine, endLine);
-            vscode.window.showInformationMessage('Lore saved to .lore.json');
-            panel.dispose();
-          } catch (e) {
-            console.error('Error saving lore:', e);
-            vscode.window.showErrorMessage('Failed to save Lore: ' + String(e));
-          }
-        } else if (msg.command === 'cancel') {
+    panel.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
+      if (msg.command === 'save') {
+        try {
+          await loreManager.upsertLoreItem(msg as SavePayload, relFile, startLine, endLine);
+          vscode.window.showInformationMessage('Lore saved to .lore.json');
           panel.dispose();
+        } catch (e) {
+          vscode.window.showErrorMessage('Failed to save Lore: ' + String(e));
         }
-      }, undefined, disposables);
+      } else if (msg.command === 'cancel') {
+        panel.dispose();
+      }
+    }, undefined, disposables);
 
     panel.onDidDispose(() => disposables.forEach(d => d.dispose()), null, context.subscriptions);
   });
 
-  // Hover provider
-  const hoverProvider = vscode.languages.registerHoverProvider('*', {
-    provideHover(document, position) {
-      const filePath = document.uri.fsPath;
-      const decorations = loreManager.getLoreItemsForFile(filePath) || [];
-
-      for (const { decoration } of decorations) {
-        if (decoration.range.contains(position)) {
-          return new vscode.Hover(decoration.hoverMessage as vscode.MarkdownString, decoration.range);
-        }
-      }
-      return null;
-    }
-  });
-
-  // CodeLens provider
-  const codeLensProvider = vscode.languages.registerCodeLensProvider('*', {
-    provideCodeLenses(document) {
-      if (!loreManager.getIsHighlightingEnabled()) {
-        return [];
-      }
-      const filePath = document.uri.fsPath;
-      const decorations = loreManager.getLoreItemsForFile(filePath) || [];
-      const lenses: vscode.CodeLens[] = [];
-
-      for (const { decoration, item } of decorations) {
-        lenses.push(
-          new vscode.CodeLens(decoration.range, { title: 'Edit Lore', command: 'lore.editComment', arguments: [item.id] }),
-          new vscode.CodeLens(decoration.range, { title: 'View Lore', command: 'lore.previewMarkdown', arguments: [item.id] })
-        );
-      }
-      return lenses;
-    }
-  });
-
-  // Show enriched comments
   const enableHighlightsCommand = vscode.commands.registerCommand('lore.enableHighlights', async () => {
-    if (!loreManager) return; // Should not happen if activated correctly
     loreManager.enableHighlights();
-    await loreManager.reloadLore(); // Reloads from disk and updates internal state
-    vscode.window.showInformationMessage(`Highlighted ${loreManager.getAllLoreItems().length} comments`);
+    await loreManager.reloadLore();
+    const activeCount = loreManager.getAllLoreItems().filter(i => i.state === 'active').length;
+    vscode.window.showInformationMessage(`Highlighted ${activeCount} active annotation${activeCount !== 1 ? 's' : ''}`);
   });
 
-  // Open Markdown preview
   const previewMarkdownCommand = vscode.commands.registerCommand('lore.previewMarkdown', async (...args: string[]) => {
     const id = args[0];
-    if (!loreManager || !vscode.workspace.workspaceFolders?.length) return;
+    if (!vscode.workspace.workspaceFolders?.length) { return; }
 
-    const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const item = loreManager.getLoreItemById(id);
-    if (!item) return;
+    if (!item) { return; }
 
     try {
-      const author = typeof item.author === 'string' ? item.author : item.author?.name || '';
-      const categoriesString = item.categories && item.categories.length > 0 ? `*Categories: ${item.categories.join(', ')}*` : '';
+      const author = typeof item.author === 'string' ? item.author : item.author?.name ?? '';
+      const categoriesString = item.categories?.length ? `*Categories: ${item.categories.join(', ')}*` : '';
       const mdContent = `# ${item.summary}\n\n${categoriesString}\n\n${author ? `*Author: ${author}*` : ''}\n${item.bodyMarkdown}\n`;
 
       const panel = vscode.window.createWebviewPanel(
@@ -168,22 +151,24 @@ export function activate(context: vscode.ExtensionContext) {
         {
           enableScripts: false,
           retainContextWhenHidden: false,
-          localResourceRoots: [vscode.Uri.file(root)]
-        }
+          localResourceRoots: [vscode.Uri.file(root)],
+        },
       );
 
-      const walkTokens = (token: Token) => {
-        if (token.type === 'image') {
-          if (!token.href.startsWith('http://') && !token.href.startsWith('https://')) {
-            const onDiskPath = vscode.Uri.file(path.join(root, token.href));
-            token.href = panel.webview.asWebviewUri(onDiskPath).toString();
+      // Use a local Marked instance to avoid mutating the global marked pipeline.
+      const localMarked = new Marked();
+      localMarked.use({
+        walkTokens(token: Token) {
+          if (token.type === 'image') {
+            if (!token.href.startsWith('http://') && !token.href.startsWith('https://')) {
+              const onDiskPath = vscode.Uri.file(path.join(root, token.href));
+              token.href = panel.webview.asWebviewUri(onDiskPath).toString();
+            }
           }
-        }
-      };
-      
-      marked.use({ walkTokens });
-      
-      const html = marked(mdContent);
+        },
+      });
+
+      const html = localMarked.parse(mdContent) as string;
       panel.webview.html = `
         <!DOCTYPE html>
         <html>
@@ -204,49 +189,64 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  // Edit command (webview)
   const editCommand = vscode.commands.registerCommand('lore.editComment', async (...args: string[]) => {
     const id = args[0];
-    if (!loreManager) return;
-
     const item = loreManager.getLoreItemById(id);
-    if (!item) return;
+    if (!item) { return; }
 
     const panel = vscode.window.createWebviewPanel(
       'loreEdit',
-      `Lore — Edit`,
+      'Lore — Edit',
       vscode.ViewColumn.Beside,
-      { enableScripts: true, retainContextWhenHidden: false }
+      { enableScripts: true, retainContextWhenHidden: false },
     );
 
-      panel.webview.html = getWebviewContent(
-        panel.webview.cspSource,
-        context.extensionUri,
-        item.file,
-        item.location.startLine,
-        item.location.endLine,
-        'edit',
-        item.summary,
-        item.bodyMarkdown,
-        typeof item.author === 'string' ? item.author : item.author?.name || '',
-        item.id,
-        item.categories
-      );
+    panel.webview.html = getWebviewContent(
+      panel.webview.cspSource,
+      context.extensionUri,
+      item.file,
+      item.location.startLine,
+      item.location.endLine,
+      'edit',
+      item.summary,
+      item.bodyMarkdown,
+      typeof item.author === 'string' ? item.author : item.author?.name ?? '',
+      item.id,
+      item.categories,
+      item.tags ?? [],
+      item.links ?? [],
+    );
 
     const disposables: vscode.Disposable[] = [];
 
     panel.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
       if (msg.command === 'save') {
         try {
-          console.log('Editing item:', item.id);
-          await loreManager.upsertLoreItem(msg as SavePayload, item.file, item.location.startLine, item.location.endLine);
-
-          // The LoreManager handles refreshing decorations and CodeLens
+          await loreManager.upsertLoreItem(
+            msg as SavePayload,
+            item.file,
+            item.location.startLine,
+            item.location.endLine,
+          );
           vscode.window.showInformationMessage('Lore updated');
           panel.dispose();
         } catch (e) {
-          console.error('Error updating lore:', e);
           vscode.window.showErrorMessage('Failed to update Lore: ' + String(e));
+        }
+      } else if (msg.command === 'archive') {
+        loreManager.setItemState((msg as { command: 'archive'; id: string }).id, 'archived');
+        vscode.window.showInformationMessage('Lore entry archived.');
+        panel.dispose();
+      } else if (msg.command === 'delete') {
+        const choice = await vscode.window.showWarningMessage(
+          'Delete this lore entry? It will be marked as deleted and hidden.',
+          { modal: true },
+          'Delete',
+        );
+        if (choice === 'Delete') {
+          loreManager.setItemState((msg as { command: 'delete'; id: string }).id, 'deleted');
+          vscode.window.showInformationMessage('Lore entry deleted.');
+          panel.dispose();
         }
       } else if (msg.command === 'cancel') {
         panel.dispose();
@@ -256,48 +256,23 @@ export function activate(context: vscode.ExtensionContext) {
     panel.onDidDispose(() => disposables.forEach(d => d.dispose()), null, context.subscriptions);
   });
 
-  // Live tracking of decorations for active editor
-  vscode.window.onDidChangeTextEditorVisibleRanges(event => {
-    loreManager.refreshDecorations();
-  });
-
-  vscode.workspace.onDidChangeTextDocument(event => {
-    loreManager.adjustLoreLocations(event);
-  });
-
-  // update lore entries when files are renamed or moved in the workspace
-  vscode.workspace.onDidRenameFiles(async (e) => {
-    if (loreManager) {
-      await loreManager.handleFileRenames(e);
-    }
-  });
-
-  // Listen for changes in LoreManager to refresh CodeLens and Status Bar
-  loreManager.onDidChangeLore(() => {
-    vscode.commands.executeCommand('editor.action.codeLensRefresh');
-    updateStatusBar();
-  });
-
-  const disableHighlightsCommand = vscode.commands.registerCommand('lore.disableHighlights', async () => {
-    if (loreManager) {
-      loreManager.clearDecorations();
-      vscode.window.showInformationMessage('Lore highlights disabled.');
-    }
+  const disableHighlightsCommand = vscode.commands.registerCommand('lore.disableHighlights', () => {
+    loreManager.clearDecorations();
+    codeLensEmitter.fire();
+    vscode.window.showInformationMessage('Lore highlights disabled.');
   });
 
   const listAllEntriesCommand = vscode.commands.registerCommand('lore.listAllEntries', async () => {
-    if (!loreManager) return;
-
     const allItems = loreManager.getAllLoreItems();
-    if (allItems.length === 0) {
+    if (!allItems.length) {
       vscode.window.showInformationMessage('No lore entries found in this workspace.');
       return;
     }
 
     const quickPickItems = allItems.map(item => ({
-      label: item.summary,
-      description: `${item.file} (Lines: ${item.location.startLine}-${item.location.endLine})`,
-      item: item,
+      label: `${item.state === 'archived' ? '$(archive) ' : ''}${item.summary}`,
+      description: `${item.file} (Lines: ${item.location.startLine}–${item.location.endLine})`,
+      item,
     }));
 
     const selected = await vscode.window.showQuickPick(quickPickItems, {
@@ -306,23 +281,67 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     if (selected && vscode.workspace.workspaceFolders) {
-      const root = vscode.workspace.workspaceFolders[0].uri;
-      const fileUri = vscode.Uri.joinPath(root, selected.item.file);
+      const rootUri = vscode.workspace.workspaceFolders[0].uri;
+      const fileUri = vscode.Uri.joinPath(rootUri, selected.item.file);
       const doc = await vscode.workspace.openTextDocument(fileUri);
       const editor = await vscode.window.showTextDocument(doc);
-      
       const range = new vscode.Range(
-        selected.item.location.startLine - 1,
-        0,
-        selected.item.location.endLine - 1,
-        0
+        selected.item.location.startLine - 1, 0,
+        selected.item.location.endLine - 1, 0,
       );
       editor.selection = new vscode.Selection(range.start, range.end);
       editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
     }
   });
 
+  // ── Providers ──────────────────────────────────────────────────────────────
+
+  const hoverProvider = vscode.languages.registerHoverProvider('*', {
+    provideHover(document, position) {
+      for (const loreDecoration of loreManager.getLoreItemsForFile(document.uri.fsPath)) {
+        if (loreDecoration.decoration.range.contains(position)) {
+          return new vscode.Hover(loreDecoration.hoverMessage, loreDecoration.decoration.range);
+        }
+      }
+      return null;
+    },
+  });
+
+  const codeLensProvider = vscode.languages.registerCodeLensProvider('*', {
+    onDidChangeCodeLenses: codeLensEmitter.event,
+    provideCodeLenses(document) {
+      if (!loreManager.getIsHighlightingEnabled()) { return []; }
+      const lenses: vscode.CodeLens[] = [];
+      for (const { decoration, item } of loreManager.getLoreItemsForFile(document.uri.fsPath)) {
+        lenses.push(
+          new vscode.CodeLens(decoration.range, { title: 'Edit Lore', command: 'lore.editComment', arguments: [item.id] }),
+          new vscode.CodeLens(decoration.range, { title: 'View Lore', command: 'lore.previewMarkdown', arguments: [item.id] }),
+        );
+      }
+      return lenses;
+    },
+  });
+
+  // ── Event listeners ────────────────────────────────────────────────────────
+
+  // Refresh decorations and lazily re-anchor when the user switches files.
+  const activeEditorListener = vscode.window.onDidChangeActiveTextEditor(editor => {
+    loreManager.onActiveEditorChanged(editor);
+    updateStatusBar();
+  });
+
+  const textDocumentListener = vscode.workspace.onDidChangeTextDocument(event => {
+    loreManager.adjustLoreLocations(event);
+  });
+
+  const fileRenameListener = vscode.workspace.onDidRenameFiles(async e => {
+    await loreManager.handleFileRenames(e);
+  });
+
+  // ── Register disposables ───────────────────────────────────────────────────
+
   context.subscriptions.push(
+    toggleHighlightsCommand,
     createCommand,
     hoverProvider,
     codeLensProvider,
@@ -331,12 +350,16 @@ export function activate(context: vscode.ExtensionContext) {
     previewMarkdownCommand,
     disableHighlightsCommand,
     listAllEntriesCommand,
-    loreManager // Ensure loreManager's dispose is called
+    activeEditorListener,
+    textDocumentListener,
+    fileRenameListener,
+    loreManager,
   );
+
+  // Trigger initial decoration pass for whatever editor is already open.
+  loreManager.onActiveEditorChanged(vscode.window.activeTextEditor);
 }
 
 export function deactivate() {
-  if (loreManager) {
-    loreManager.dispose();
-  }
+  loreManager?.dispose();
 }

@@ -1,28 +1,37 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "fileMetadata": {
     "workspace": "annot8-lore",
     "createdAt": "2025-11-28T00:00:00Z",
     "lastUpdatedAt": "2025-11-28T00:00:00Z",
     "lastUpdatedBy": "dev@example.com",
-    "repoCommit": "deadbeef"
+    "repoCommit": "swegrn"
   },
-  "indexes": { "tags": {}, "filesWithComments": 1 },
-  "items": [
-    {
-      "id": "lore-1",
-      "state": "active",
-      "file": "src/example.ts",
-      "location": { "startLine": 10, "endLine": 12, "anchorText": "function example()" },
-      "summary": "Why this function uses an explicit state machine",
-      "bodyMarkdown": "Detailed explanation and references. Use #LOC:10 to reference lines.",
-      "tags": ["design"],
-      "links": ["https://example.com/doc/arch"],
-      "author": { "name": "A. Dev", "email": "a.dev@example.com" },
-      "createdAt": "2025-11-28T00:00:00Z",
-      "updatedAt": "2025-11-28T00:00:00Z",
-      "contentType": "markdown",
-      "isTrusted": false
-    }
-  ]
+  "indexes": { "tags": { "design": 1 }, "filesWithComments": 1 },
+  "items": {
+    "src/example.ts": [
+      {
+        "id": "lore-1",
+        "state": "active",
+        "file": "src/example.ts",
+        "location": {
+          "startLine": 10,
+          "endLine": 12,
+          "anchorText": "function example()",
+          "contextPreview": "// preceding line\nfunction example()\n// following line",
+          "lineHash": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        },
+        "summary": "Why this function uses an explicit state machine",
+        "bodyMarkdown": "Detailed explanation and references. Use #LOC:10 to reference lines.",
+        "categories": ["Architectural Decision"],
+        "tags": ["design"],
+        "links": ["https://example.com/doc/arch"],
+        "author": { "name": "A. Dev", "email": "a.dev@example.com" },
+        "createdAt": "2025-11-28T00:00:00Z",
+        "updatedAt": "2025-11-28T00:00:00Z",
+        "contentType": "markdown",
+        "isTrusted": false
+      }
+    ]
+  }
 }

@@ -8,6 +8,10 @@ Issues.md
 node_modules/
 out/
 .vscode/
+.vscode-test/
+
+# Build artifacts
+*.vsix
 
 # macOS
 # General system files

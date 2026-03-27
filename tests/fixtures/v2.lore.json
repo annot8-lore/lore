@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "fileMetadata": {
+    "workspace": "test-workspace",
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "lastUpdatedAt": "2024-01-01T00:00:00.000Z",
+    "lastUpdatedBy": ""
+  },
+  "indexes": { "tags": { "design": 1 }, "filesWithComments": 2 },
+  "items": {
+    "src/main.ts": [
+      {
+        "id": "abc-123",
+        "state": "active",
+        "file": "src/main.ts",
+        "location": { "startLine": 10, "endLine": 15, "anchorText": "function main()", "lineHash": "abc" },
+        "summary": "Main function",
+        "bodyMarkdown": "Entry point",
+        "tags": ["design"],
+        "links": [],
+        "author": "Alice",
+        "createdAt": "2024-01-01T00:00:00.000Z",
+        "updatedAt": "2024-01-01T00:00:00.000Z",
+        "categories": ["Architectural Decision"]
+      }
+    ],
+    "src/utils.ts": [
+      {
+        "id": "def-456",
+        "state": "archived",
+        "file": "src/utils.ts",
+        "location": { "startLine": 5, "endLine": 5 },
+        "summary": "Utils helper",
+        "bodyMarkdown": "",
+        "tags": [],
+        "links": [],
+        "author": "",
+        "createdAt": "2024-01-01T00:00:00.000Z",
+        "updatedAt": "2024-01-01T00:00:00.000Z",
+        "categories": []
+      }
+    ]
+  }
+}

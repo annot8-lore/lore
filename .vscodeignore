@@ -1,0 +1,24 @@
+# Source files — not needed at runtime (out/ has the compiled bundle)
+src/
+tsconfig.json
+esbuild.js
+.npmrc
+
+# Dev tooling
+node_modules/
+.vscode/
+out/tests/
+**/*.map
+vitest.config.ts
+tsconfig.tests.json
+tests/
+.github/
+
+# Docs / repo meta
+docs/
+.gitignore
+*.md
+!README.md
+
+# Build artefacts that shouldn't be double-packaged
+*.vsix

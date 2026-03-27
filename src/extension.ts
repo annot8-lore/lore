@@ -39,8 +39,21 @@ export async function activate(context: vscode.ExtensionContext) {
     return;
   }
 
+  if ((vscode.workspace.workspaceFolders?.length ?? 0) > 1) {
+    vscode.window.showInformationMessage(
+      'Lore: Multiple workspace folders detected — annotations are tracked for the first folder only.',
+    );
+  }
+
   const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
   loreManager = await LoreManager.create(context, root);
+
+  // Restore or auto-enable highlights from persisted/config state.
+  const cfg = vscode.workspace.getConfiguration('lore');
+  const wasHighlighting = context.workspaceState.get<boolean>('lore.highlightingEnabled', false);
+  if (wasHighlighting || cfg.get<boolean>('highlightOnStartup', false)) {
+    loreManager.enableHighlights();
+  }
 
   const updateStatusBar = () => {
     statusBarItem.text = loreManager.getIsHighlightingEnabled() ? `$(eye) Lore: On` : `$(eye-closed) Lore: Off`;
@@ -59,10 +72,21 @@ export async function activate(context: vscode.ExtensionContext) {
     updateStatusBar();
   });
 
+  const configListener = vscode.workspace.onDidChangeConfiguration(e => {
+    if (e.affectsConfiguration('lore.highlightColor')) {
+      const newColor = vscode.workspace.getConfiguration('lore').get<string>('highlightColor', 'rgba(255, 255, 0, 0.2)');
+      loreManager.updateHighlightColor(newColor);
+    }
+  });
+  context.subscriptions.push(configListener);
+
   // ── Commands ──────────────────────────────────────────────────────────────
+
+  const persistHighlight = (on: boolean) => context.workspaceState.update('lore.highlightingEnabled', on);
 
   const toggleHighlightsCommand = vscode.commands.registerCommand('lore.toggleHighlights', () => {
     loreManager.toggleHighlights();
+    persistHighlight(loreManager.getIsHighlightingEnabled());
     codeLensEmitter.fire();
     updateStatusBar();
   });
@@ -127,6 +151,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const enableHighlightsCommand = vscode.commands.registerCommand('lore.enableHighlights', async () => {
     loreManager.enableHighlights();
+    persistHighlight(true);
     await loreManager.reloadLore();
     const activeCount = loreManager.getAllLoreItems().filter(i => i.state === 'active').length;
     vscode.window.showInformationMessage(`Highlighted ${activeCount} active annotation${activeCount !== 1 ? 's' : ''}`);
@@ -140,22 +165,31 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!item) { return; }
 
     try {
+      const { randomBytes } = require('crypto') as typeof import('crypto');
+      const nonce = randomBytes(16).toString('hex');
+
       const author = typeof item.author === 'string' ? item.author : item.author?.name ?? '';
-      const categoriesString = item.categories?.length ? `*Categories: ${item.categories.join(', ')}*` : '';
-      const mdContent = `# ${item.summary}\n\n${categoriesString}\n\n${author ? `*Author: ${author}*` : ''}\n${item.bodyMarkdown}\n`;
+      const metaParts: string[] = [];
+      if (item.categories?.length) { metaParts.push(`**Categories:** ${item.categories.join(', ')}`); }
+      if (item.tags?.length) { metaParts.push(`**Tags:** ${item.tags.join(', ')}`); }
+      if (author) { metaParts.push(`**Author:** ${author}`); }
+      if (item.links?.length) {
+        metaParts.push(`**Links:**\n${item.links.map(l => `- [${l}](${l})`).join('\n')}`);
+      }
+      const meta = metaParts.length ? metaParts.join('\n\n') + '\n\n---\n\n' : '';
+      const mdContent = `# ${item.summary}\n\n${meta}${item.bodyMarkdown}\n`;
 
       const panel = vscode.window.createWebviewPanel(
         'lorePreview',
         `Lore — ${item.summary}`,
         vscode.ViewColumn.Beside,
         {
-          enableScripts: false,
+          enableScripts: true,
           retainContextWhenHidden: false,
           localResourceRoots: [vscode.Uri.file(root)],
         },
       );
 
-      // Use a local Marked instance to avoid mutating the global marked pipeline.
       const localMarked = new Marked();
       localMarked.use({
         walkTokens(token: Token) {
@@ -168,22 +202,62 @@ export async function activate(context: vscode.ExtensionContext) {
         },
       });
 
-      const html = localMarked.parse(mdContent) as string;
-      panel.webview.html = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <style>
-            body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); padding: 20px; }
-            .markdown-body { max-width: none; }
-          </style>
-        </head>
-        <body class="markdown-body">
-          ${html}
-        </body>
-        </html>
-      `;
+      const rawHtml = localMarked.parse(mdContent) as string;
+      // Convert #LOC:x references to clickable links handled by the webview script.
+      const html = rawHtml.replace(
+        /#LOC:(\d+)/g,
+        (_, n) => `<a class="loc-link" data-line="${n}" href="#" title="Jump to line ${n}">#LOC:${n}</a>`,
+      );
+
+      panel.webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; img-src ${panel.webview.cspSource} https: data:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';" />
+  <style>
+    body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); padding: 20px; line-height: 1.6; }
+    a { color: var(--vscode-textLink-foreground); }
+    a:hover { color: var(--vscode-textLink-activeForeground); }
+    a.loc-link { font-family: var(--vscode-editor-font-family, monospace); font-size: 0.9em; }
+    code { font-family: var(--vscode-editor-font-family, monospace); background: var(--vscode-textCodeBlock-background); padding: 1px 4px; border-radius: 3px; }
+    pre code { display: block; padding: 12px; overflow-x: auto; }
+    blockquote { border-left: 3px solid var(--vscode-textBlockQuote-border); margin: 0; padding-left: 16px; color: var(--vscode-textBlockQuote-foreground); }
+    hr { border: none; border-top: 1px solid var(--vscode-widget-border); margin: 16px 0; }
+  </style>
+</head>
+<body>
+  ${html}
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    document.querySelectorAll('.loc-link').forEach(el => {
+      el.addEventListener('click', e => {
+        e.preventDefault();
+        vscode.postMessage({ command: 'navigateTo', line: parseInt(el.dataset.line, 10) });
+      });
+    });
+  </script>
+</body>
+</html>`;
+
+      const previewDisposables: vscode.Disposable[] = [];
+      panel.webview.onDidReceiveMessage(async (msg) => {
+        if (msg.command === 'navigateTo' && vscode.workspace.workspaceFolders?.length) {
+          const fileUri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, item.file);
+          try {
+            const doc = await vscode.workspace.openTextDocument(fileUri);
+            const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+            const line = Math.max(0, (msg.line as number) - 1);
+            const range = new vscode.Range(line, 0, line, 0);
+            editor.selection = new vscode.Selection(range.start, range.end);
+            editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+          } catch {
+            vscode.window.showErrorMessage(`Lore: cannot navigate — file "${item.file}" not found.`);
+          }
+        }
+      }, undefined, previewDisposables);
+      panel.onDidDispose(() => previewDisposables.forEach(d => d.dispose()), null, context.subscriptions);
+
     } catch (e) {
       vscode.window.showErrorMessage('Failed to open lore preview: ' + String(e));
     }
@@ -258,6 +332,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const disableHighlightsCommand = vscode.commands.registerCommand('lore.disableHighlights', () => {
     loreManager.clearDecorations();
+    persistHighlight(false);
     codeLensEmitter.fire();
     vscode.window.showInformationMessage('Lore highlights disabled.');
   });

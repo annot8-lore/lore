@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "fileMetadata": {
+    "workspace": "test-workspace",
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "lastUpdatedAt": "2024-01-01T00:00:00.000Z",
+    "lastUpdatedBy": ""
+  },
+  "indexes": { "tags": {}, "filesWithComments": 0 },
+  "items": [
+    {
+      "id": "abc-123",
+      "state": "active",
+      "file": "src/main.ts",
+      "location": { "startLine": 10, "endLine": 15 },
+      "summary": "V1 item",
+      "bodyMarkdown": "Body text",
+      "tags": ["design"],
+      "links": [],
+      "author": "Alice",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "categories": []
+    },
+    {
+      "id": "def-456",
+      "state": "active",
+      "file": "src/utils.ts",
+      "location": { "startLine": 5, "endLine": 5 },
+      "summary": "Utils item",
+      "bodyMarkdown": "",
+      "tags": [],
+      "links": [],
+      "author": "",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "categories": []
+    }
+  ]
+}

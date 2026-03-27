@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { LoreStore } from './LoreStore';
+import { shiftRange } from './rangeUtils';
 import type { LoreItem, SavePayload } from './types';
 
 interface LoreDecoration {
@@ -14,7 +15,7 @@ interface LoreDecoration {
 export class LoreManager implements vscode.Disposable {
     private isHighlightingEnabled = false;
     private commentRanges = new Map<string, LoreDecoration[]>();
-    private readonly decorationType: vscode.TextEditorDecorationType;
+    private decorationType: vscode.TextEditorDecorationType;
     private readonly staleDecorationType: vscode.TextEditorDecorationType;
     /** Items whose anchor could not be found in the current file. Cleared on any store change. */
     private staleItemIds = new Set<string>();
@@ -24,9 +25,10 @@ export class LoreManager implements vscode.Disposable {
     private constructor(
         private readonly store: LoreStore,
         private readonly workspaceRoot: string,
+        highlightColor: string,
     ) {
         this.decorationType = vscode.window.createTextEditorDecorationType({
-            backgroundColor: 'rgba(255, 255, 0, 0.3)',
+            backgroundColor: highlightColor,
             isWholeLine: true,
         });
         this.staleDecorationType = vscode.window.createTextEditorDecorationType({
@@ -52,7 +54,8 @@ export class LoreManager implements vscode.Disposable {
         workspaceRoot: string,
     ): Promise<LoreManager> {
         const store = await LoreStore.create(workspaceRoot);
-        const manager = new LoreManager(store, workspaceRoot);
+        const color = vscode.workspace.getConfiguration('lore').get<string>('highlightColor', 'rgba(255, 255, 0, 0.2)');
+        const manager = new LoreManager(store, workspaceRoot, color);
         // LoreStore.create() fires onDidChange before the listener above is registered.
         // Populate ranges explicitly here.
         manager.updateCommentRanges();
@@ -85,6 +88,16 @@ export class LoreManager implements vscode.Disposable {
 
     setItemState(id: string, state: 'archived' | 'deleted'): void {
         this.store.setState(id, state);
+    }
+
+    /** Re-creates the active decoration type with a new color and redraws. */
+    updateHighlightColor(color: string) {
+        this.decorationType.dispose();
+        this.decorationType = vscode.window.createTextEditorDecorationType({
+            backgroundColor: color,
+            isWholeLine: true,
+        });
+        this.refreshDecorations();
     }
 
     async handleFileRenames(event: vscode.FileRenameEvent) {
@@ -227,19 +240,12 @@ export class LoreManager implements vscode.Disposable {
             const changeStart = change.range.start.line;
 
             for (const lore of fileDecorations) {
-                let start = lore.decoration.range.start.line;
-                let end = lore.decoration.range.end.line;
-
-                if (changeStart < start) {
-                    start += delta;
-                    end += delta;
-                } else if (changeStart >= start && changeStart <= end) {
-                    end += delta;
-                }
-
-                if (start < 0) { start = 0; }
-                if (end < start) { end = start; }
-
+                const { start, end } = shiftRange(
+                    lore.decoration.range.start.line,
+                    lore.decoration.range.end.line,
+                    changeStart,
+                    delta,
+                );
                 lore.decoration.range = new vscode.Range(start, 0, end, 0);
                 lore.item.location.startLine = start + 1;
                 lore.item.location.endLine = end + 1;
